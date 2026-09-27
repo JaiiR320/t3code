@@ -1,5 +1,24 @@
 # T3 Code
 
+## Jair's personal fork
+
+This checkout is Jair's fork, `JaiiR320/t3code`. The upstream guidance below still applies, with these local workflow preferences:
+
+- `origin` is `https://github.com/JaiiR320/t3code.git`; `upstream` is `https://github.com/pingdotgg/t3code.git`. Verify remotes before pushing. Push only to the fork unless Jair explicitly requests otherwise.
+- `personal` is the fork's default branch and combines upstream updates with Jair's fixes. Keep `main` aligned with upstream; do not merge personal fixes into it.
+- Start focused fix or feature branches from `personal`. Integrate completed fixes into `personal` when asked to ship them. Keep commits small so fixes remain easy to review and contribute upstream. Do not prefix branch names, issue titles, or PR titles with `codex/`.
+- Do not open a PR, including one against upstream, unless requested. A local install does not require a PR or GitHub release.
+
+### Updating Jair's desktop app
+
+After completing changes that affect the desktop app, its web UI, bundled server, or shared runtime, run the relevant checks, then build and install the updated desktop app locally. This is the default completion workflow unless Jair asks to skip it. Documentation-only, test-only, mobile-only, and marketing-only changes do not need a desktop rebuild.
+
+- Use the repository's packaging script for a fresh Linux x64 build: `node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64 --output-dir <fresh-output-directory>`. It builds the desktop and bundled server and packages with `--publish never`. Do not use `--skip-build` with stale artifacts. Keep build output outside tracked source files.
+- Inspect the existing launcher before installing. At setup, `~/.local/bin/t3code` launches `~/.local/opt/t3code-keybindings-build/linux-unpacked/t3code`. The user desktop entries are `~/.local/share/applications/t3code.desktop` and `~/.local/share/applications/com.t3tools.T3Code.desktop`; the latter points directly to the custom executable. Update both launch paths consistently if the installation path changes.
+- Install the completed artifact into a fresh directory under `~/.local/opt`, then switch the user launchers to it. An AppImage can be extracted with `--appimage-extract` into a fresh directory without launching the app. Verify the installed executable and launcher targets, and retain the previous working build for rollback. Do not overwrite files used by the running app or modify the system package under `/opt/t3code-bin`.
+- Do not quit or restart Jair's running app or service automatically. Never alter `~/.t3/userdata` as part of installation. Updating the desktop does not update a separately running service; report when a server-side change also needs that service updated.
+- Report the source commit and any uncommitted changes included, checks run, installation path, and whether Jair needs to quit and reopen T3. If the build or install fails, report the failure and leave the working installation in place. Do not claim the app is updated after only compiling source.
+
 T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients.
 
 You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
