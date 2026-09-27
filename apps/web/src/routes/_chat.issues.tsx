@@ -4,9 +4,10 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 export const Route = createFileRoute("/_chat/issues")({
   beforeLoad: ({ location }) => {
     const search = location.search as Record<string, unknown>;
-    const params = new URLSearchParams({ tab: "issues" });
+    const params = new URLSearchParams();
     if (search.remote === "upstream") params.set("remote", "upstream");
     if (search.state === "closed") params.set("issueState", "closed");
-    throw redirect({ href: `/source-control?${params}`, replace: true });
+    const query = params.toString();
+    throw redirect({ href: `/source-control${query ? `?${query}` : ""}`, replace: true });
   },
 });

@@ -159,8 +159,8 @@ function getShortcutContext() {
 }
 
 export interface PullRequestsSearch extends PullRequestListPreferences {
-  /** Which list the page shows. Absent is pull requests, so older links open where they did. */
-  readonly tab?: "issues";
+  /** Which list the page shows. Absent is issues. */
+  readonly tab?: "pull-requests";
   /** The issues tab's remote. Absent is `origin`. */
   readonly remote?: "upstream";
   /** The issues tab's state filter. Absent is open issues. */
@@ -312,7 +312,7 @@ export const Route = createFileRoute("/_chat/source-control")({
       ? { author: raw.author.trim().slice(0, 200) }
       : {}),
     ...pullRequestSearchLabels(raw.labels),
-    ...(raw.tab === "issues" ? { tab: "issues" as const } : {}),
+    ...(raw.tab === "pull-requests" ? { tab: "pull-requests" as const } : {}),
     ...(raw.remote === "upstream" ? { remote: "upstream" as const } : {}),
     ...(raw.issueState === "closed" ? { issueState: "closed" as const } : {}),
   }),
@@ -322,7 +322,7 @@ export const Route = createFileRoute("/_chat/source-control")({
 function PullRequestsRouteView() {
   useEscapeToGoBack();
   const search = Route.useSearch();
-  const tab: SourceControlTab = search.tab === "issues" ? "issues" : "pull-requests";
+  const tab: SourceControlTab = search.tab ?? "issues";
   const sort = search.sort ?? "ready";
   const statsPolicy: PullRequestStatsPolicy =
     sort === "ready" || sort === "largest" || sort === "smallest" ? "eager" : "visible";
@@ -2014,7 +2014,7 @@ function PullRequestsRouteView() {
     onTab: (next: SourceControlTab) => {
       // Each tab starts at its own top rather than wherever the other one was scrolled to.
       scrollRef.current?.scrollTo({ top: 0 });
-      updateSearch({ tab: next === "issues" ? "issues" : undefined });
+      updateSearch({ tab: next === "pull-requests" ? "pull-requests" : undefined });
     },
     ...(tab === "issues" ? issuesTab : pullRequestsTab),
     rightPanelControl:

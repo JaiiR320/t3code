@@ -2023,7 +2023,10 @@ function OpenCommandPaletteDialog(props: {
       title: "Open pull requests",
       icon: <PullRequestGlyph.pullRequest className={ITEM_ICON_CLASS} />,
       run: async () => {
-        await navigate({ to: "/source-control", search: readPullRequestListPreferences() });
+        await navigate({
+          to: "/source-control",
+          search: { ...readPullRequestListPreferences(), tab: "pull-requests" },
+        });
       },
     });
   }
@@ -2042,7 +2045,7 @@ function OpenCommandPaletteDialog(props: {
       run: async () => {
         await navigate({
           to: "/source-control",
-          search: { ...readPullRequestListPreferences(), tab: "issues" },
+          search: readPullRequestListPreferences(),
         });
       },
     });
