@@ -730,7 +730,7 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const projects = useProjects();
   const referenceThreadRef =
-    pathname === "/pull-requests"
+    pathname === "/source-control"
       ? environments.some(
           (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
         )
@@ -744,7 +744,7 @@ function OpenCommandPaletteDialog(props: {
     activeThread?.environmentId ?? ("" as EnvironmentId),
   );
   const activeThreadReferenceCopyTarget =
-    referenceThreadRef === null || (pathname === "/pull-requests" && !openPanelPullRequestUrl)
+    referenceThreadRef === null || (pathname === "/source-control" && !openPanelPullRequestUrl)
       ? null
       : resolveThreadReferenceCopyTarget({
           threadId: referenceThreadRef.threadId,
@@ -2023,7 +2023,7 @@ function OpenCommandPaletteDialog(props: {
       title: "Open pull requests",
       icon: <PullRequestGlyph.pullRequest className={ITEM_ICON_CLASS} />,
       run: async () => {
-        await navigate({ to: "/pull-requests", search: readPullRequestListPreferences() });
+        await navigate({ to: "/source-control", search: readPullRequestListPreferences() });
       },
     });
   }
@@ -2041,15 +2041,8 @@ function OpenCommandPaletteDialog(props: {
       icon: <CircleDotIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         await navigate({
-          to: "/issues",
-          search: {
-            project: undefined,
-            issue: undefined,
-            remote: "origin",
-            state: "open",
-            page: 1,
-            commentsPage: 1,
-          },
+          to: "/source-control",
+          search: { ...readPullRequestListPreferences(), tab: "issues" },
         });
       },
     });

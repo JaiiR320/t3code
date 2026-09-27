@@ -69,7 +69,19 @@ function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry[
  * a narrow column. The intrinsic size is the content box a skipped row reserves, which is the
  * two lines without the padding: a 56px row less 20px of `py-2.5`.
  */
-const PAGE_ROW_CLASS = "px-3 py-2.5 [contain-intrinsic-block-size:36.5px]";
+/** A row of the source control page's lists, pull request or issue, as a pressable button. */
+export function sourceControlPageRowClassName(selected: boolean) {
+  return cn(
+    PULL_REQUEST_ROW_CLASS,
+    "px-3 py-2.5 [contain-intrinsic-block-size:36.5px]",
+    "cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+    // Offscreen rows are skipped for style, layout and paint: a long list costs what the
+    // viewport shows, not what the pages have loaded. The intrinsic size keeps the
+    // scrollbar honest while a row is skipped.
+    "[content-visibility:auto]",
+    selected ? "bg-accent" : "hover:bg-accent/60",
+  );
+}
 
 export type PullRequestRowTarget = Pick<
   EnvironmentPullRequestEntry,
@@ -112,16 +124,7 @@ function PullRequestRowImpl({
       type="button"
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(entry)}
-      className={cn(
-        PULL_REQUEST_ROW_CLASS,
-        PAGE_ROW_CLASS,
-        "cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-        // Offscreen rows are skipped for style, layout and paint: a long list costs what the
-        // viewport shows, not what the pages have loaded. The intrinsic size keeps the
-        // scrollbar honest while a row is skipped.
-        "[content-visibility:auto]",
-        selected ? "bg-accent" : "hover:bg-accent/60",
-      )}
+      className={sourceControlPageRowClassName(selected)}
     >
       <PullRequestRowGlyph
         state={entry.state}

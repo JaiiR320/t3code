@@ -95,8 +95,8 @@ uses the project's instructions and recent commit subjects.
 
 ## Review and merge
 
-Open **Pull requests** to review changes and comments, request reviewers, check out a branch,
-or merge. You can edit review titles and descriptions and your own comments where the host allows it.
+Open **Source Control** in the sidebar, then its **Pull requests** tab, to review changes and
+comments, request reviewers, check out a branch, or merge. You can edit review titles and descriptions and your own comments where the host allows it.
 GitLab calls these merge requests.
 
 GitHub, GitLab, and Azure DevOps support auto-merge while checks are outstanding. GitHub also
@@ -135,6 +135,13 @@ server, but the host's own site will not show them, and the count reads **viewed
 The **Code** tab is a web and desktop surface. The mobile app reports a pull request's status but
 does not show its diff, so marks are made and read on web and desktop.
 
+## Browse issues
+
+The **Issues** tab on the Source Control page lists a project's GitHub issues, one project at a time.
+Choose the project and whether to read the `origin` or `upstream` remote from the filters. Open an
+issue to read it beside the list, then use **Start thread** to open a new thread in a worktree based
+on the default branch, with a link to the issue in the composer.
+
 ## Troubleshooting
 
 - **Not authenticated:** run the provider's login command on the server, then rescan. For Bitbucket,
@@ -153,7 +160,7 @@ pull request link in the conversation. Creating a pull request from Git actions 
 Agents can link their pull requests with the `link_pull_request` tool.
 
 Use **Link this PR** in a branch-detected badge's tooltip to keep it with the thread. From a review
-on the Pull Requests page, **Link to thread** lets you search for an active thread. The review header
+on the Source Control page, **Link to thread** lets you search for an active thread. The review header
 also lists the threads that link to it, including archived threads, so you can return to their context.
 
 Thread badges show a stack's layer count or the current review number with a count of additional
@@ -171,7 +178,7 @@ out from the matching organization and repository.
 
 ## GitHub stacks
 
-The Pull Requests page shows each PR's position in its GitHub stack. Open the stack badge in a
+The Source Control page shows each PR's position in its GitHub stack. Open the stack badge in a
 review to navigate its layers. **Merge stack** submits the selected pull request and every unmerged
 layer below it to GitHub together, respecting branch rules and merge queues. The confirmation shows
 the scope and merge strategy. GitHub rebases the remaining stack after merging.

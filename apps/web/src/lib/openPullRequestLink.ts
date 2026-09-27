@@ -285,8 +285,9 @@ export function useOpenChangeRequestLink(
         });
         if (!resolvedThreadRef) {
           void navigate({
-            to: "/pull-requests",
-            search: (previous) => ({
+            to: "/source-control",
+            // A pull request opens on the pull request tab, whichever tab was showing.
+            search: ({ tab: _tab, ...previous }) => ({
               ...previous,
               involvement: previous.involvement ?? "all",
               state: previous.state ?? "all",
@@ -302,7 +303,7 @@ export function useOpenChangeRequestLink(
         return true;
       }
       void navigate({
-        to: "/pull-requests",
+        to: "/source-control",
         search: {
           involvement: "all",
           // Every state, so the pull request being opened is also in the list behind it whether
