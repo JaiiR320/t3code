@@ -3,12 +3,14 @@ import type {
   PullRequestMergeability,
   PullRequestState,
 } from "@t3tools/contracts";
+import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import { MiddleTruncate } from "../ui/middle-truncate";
+import { Separator } from "../ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   PullRequestActorAvatar,
@@ -161,5 +163,33 @@ export function PullRequestRowBranches({ head, base }: { head: string; base: str
       <span className="shrink-0">→</span>
       <MiddleTruncate value={base} className="max-w-[45%] shrink-0" />
     </span>
+  );
+}
+
+/**
+ * A group reads like the sidebar's shelves: its glyph, its name, how many, then a rule out to
+ * the edge. Anything the group wants to say about itself rides after the rule.
+ */
+export function PullRequestListGroupHeader({
+  Icon,
+  label,
+  count,
+  children,
+}: {
+  Icon: LucideIcon;
+  label: string;
+  count: number;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-2 px-3 pb-1 text-xs font-medium text-muted-foreground/70">
+      <Icon aria-hidden className="size-3.5 shrink-0" />
+      <h2 className="shrink-0">{label}</h2>
+      <span className="shrink-0 tabular-nums text-muted-foreground/50">
+        {count.toLocaleString()}
+      </span>
+      <Separator className="min-w-2 flex-1" />
+      {children}
+    </div>
   );
 }

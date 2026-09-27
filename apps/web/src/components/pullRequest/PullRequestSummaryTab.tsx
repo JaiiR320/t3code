@@ -57,7 +57,12 @@ import { PullRequestCommentBody } from "./PullRequestCommentBody";
 import { PullRequestMarkdownEditor } from "./PullRequestMarkdownEditor";
 import { PullRequestReactionBar } from "./PullRequestReactions";
 import { PullRequestConversationGhost } from "./PullRequestGhosts";
-import { sectionCollapseAnchorScrollTop } from "./pullRequestSummaryScroll.logic";
+import {
+  PullRequestCommentCard,
+  PullRequestCommentIdentity,
+  PullRequestMetaRow,
+  PullRequestSummarySection,
+} from "./PullRequestSummaryParts";
 
 /** One reviewer, however a host happens to have cased their login this time. */
 function reviewerKey(login: string): string {
@@ -77,31 +82,12 @@ function CommentIdentity({
       ? new URL(`/${encodeURIComponent(actor.login)}`, detail.url).toString()
       : null;
   return (
-    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-      <PullRequestActorLabel actor={actor} profileUrl={profileUrl} className="max-w-full" />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            comment.url ? (
-              <a
-                href={comment.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-muted-foreground hover:text-foreground hover:underline"
-              />
-            ) : (
-              <span className="text-muted-foreground" />
-            )
-          }
-        >
-          <time dateTime={comment.createdAt}>{formatRelativeTimeLabel(comment.createdAt)}</time>
-        </TooltipTrigger>
-        <TooltipPopup>
-          {new Date(comment.createdAt).toLocaleString()}
-          {comment.url ? " · Open comment on host" : ""}
-        </TooltipPopup>
-      </Tooltip>
-    </div>
+    <PullRequestCommentIdentity
+      actor={actor}
+      profileUrl={profileUrl}
+      createdAt={comment.createdAt}
+      url={comment.url}
+    />
   );
 }
 
@@ -257,94 +243,6 @@ function CollapsedComment({
           ) : null}
         </CollapsiblePanel>
       </article>
-    </Collapsible>
-  );
-}
-
-function MetaRow({
-  icon,
-  label,
-  children,
-}: {
-  icon: ReactNode;
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="grid min-h-7 min-w-0 grid-cols-[6rem_minmax(0,1fr)] items-center gap-2 text-xs sm:min-h-6">
-      <span className="flex items-center gap-1.5 text-muted-foreground">
-        {icon}
-        {label}
-      </span>
-      <span className="min-w-0 text-foreground">{children}</span>
-    </div>
-  );
-}
-
-function Section({
-  title,
-  defaultOpen = true,
-  keepMounted = false,
-  actions,
-  children,
-}: {
-  title: string;
-  defaultOpen?: boolean;
-  keepMounted?: boolean;
-  /** Heading controls stay separate from the collapse trigger so they remain independently usable. */
-  actions?: ReactNode;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const headingRef = useRef<HTMLDivElement>(null);
-  const setOpenWithScrollAnchor = (nextOpen: boolean) => {
-    if (!nextOpen) {
-      const heading = headingRef.current;
-      const section = heading?.closest<HTMLElement>("[data-pull-request-summary-section]");
-      const scroller = heading?.closest<HTMLElement>("[data-pull-request-summary-scroll]");
-      if (heading && section && scroller) {
-        const target = sectionCollapseAnchorScrollTop({
-          scrollTop: scroller.scrollTop,
-          viewportTop: scroller.getBoundingClientRect().top,
-          sectionTop: section.getBoundingClientRect().top,
-          headingTop: heading.getBoundingClientRect().top,
-        });
-        // Synchronous with the press: React commits the collapsed height before the browser
-        // paints, so the reader sees the heading they pressed stay put rather than a jump first.
-        if (target !== null) scroller.scrollTop = target;
-      }
-    }
-    setOpen(nextOpen);
-  };
-  return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpenWithScrollAnchor}
-      render={<section aria-label={title} />}
-      data-pull-request-summary-section
-    >
-      {/* The heading rides the top of the scroll box the way a diff's file header does, so a
-          section can be collapsed from wherever its body has been read to rather than only from
-          where it started. Opaque, because the rows it covers scroll beneath it. */}
-      <div
-        ref={headingRef}
-        className="sticky top-0 z-10 flex w-full items-center bg-background pr-4"
-      >
-        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1.5 px-4 py-3 text-left text-xs font-medium text-muted-foreground hover:text-foreground">
-          <span>{title}</span>
-          <ChevronRightIcon
-            aria-hidden
-            className={cn(
-              "size-3.5 text-muted-foreground/60 transition-transform",
-              open && "rotate-90",
-            )}
-          />
-        </CollapsibleTrigger>
-        {actions}
-      </div>
-      <CollapsiblePanel keepMounted={keepMounted}>
-        <div className="px-4 pb-4">{children}</div>
-      </CollapsiblePanel>
     </Collapsible>
   );
 }
@@ -662,37 +560,38 @@ export function PullRequestSummaryTab({
       />
     );
     return (
-      <article
+      <PullRequestCommentCard
         key={`${detail.url}:${comment.id}`}
-        // Offscreen comments skip style, layout and paint. Bot comments carry pages of
-        // highlighted code, and the conversation is below the description either way.
-        className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:160px] [content-visibility:auto]"
-      >
-        <div className="flex flex-wrap items-start gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <CommentIdentity comment={comment} detail={detail} />
-            {outcome ? (
-              <PullRequestReviewOutcomeBadge outcome={outcome} />
-            ) : comment.reviewState ? (
-              <span>{reviewStateLabel(comment.reviewState)}</span>
-            ) : null}
-          </div>
-          {/* Review remarks only. A plain conversation comment is talk, not a finding,
+        header={
+          <>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <CommentIdentity comment={comment} detail={detail} />
+              {outcome ? (
+                <PullRequestReviewOutcomeBadge outcome={outcome} />
+              ) : comment.reviewState ? (
+                <span>{reviewStateLabel(comment.reviewState)}</span>
+              ) : null}
+            </div>
+            {/* Review remarks only. A plain conversation comment is talk, not a finding,
                       and offering to fix one would promise more than it says. */}
-          {onFixFinding && finding ? (
-            <Button
-              size="xs"
-              variant="ghost"
-              className="-mt-1 shrink-0"
-              disabled={pendingFinding !== null && pendingFinding !== undefined}
-              onClick={() => onFixFinding(finding)}
-            >
-              <HammerIcon className="size-3" />
-              {pendingFinding === pullRequestFindingKey(finding) ? "Preparing..." : fixFindingLabel}
-            </Button>
-          ) : null}
-          {reactionBar}
-        </div>
+            {onFixFinding && finding ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                className="-mt-1 shrink-0"
+                disabled={pendingFinding !== null && pendingFinding !== undefined}
+                onClick={() => onFixFinding(finding)}
+              >
+                <HammerIcon className="size-3" />
+                {pendingFinding === pullRequestFindingKey(finding)
+                  ? "Preparing..."
+                  : fixFindingLabel}
+              </Button>
+            ) : null}
+            {reactionBar}
+          </>
+        }
+      >
         <div className="px-3">
           <CommentLocation comment={comment} thread={thread} />
         </div>
@@ -703,7 +602,7 @@ export function PullRequestSummaryTab({
         {body === null && !commentEditing.canEdit(comment) ? null : (
           <CommentBody className="px-3 py-3" comment={comment} editing={commentEditing} />
         )}
-      </article>
+      </PullRequestCommentCard>
     );
   };
 
@@ -711,7 +610,7 @@ export function PullRequestSummaryTab({
     <div className="h-full overflow-y-auto" data-pull-request-summary-scroll>
       <section className="px-4 pt-2.5 pb-1">
         <div className="space-y-2">
-          <MetaRow icon={<UsersIcon className="size-3.5" />} label="Reviewers">
+          <PullRequestMetaRow icon={<UsersIcon className="size-3.5" />} label="Reviewers">
             <span className="flex min-w-0 flex-wrap items-center gap-1.5">
               {reviewerEntries.length === 0 ? (
                 <span className="text-muted-foreground">None</span>
@@ -792,11 +691,11 @@ export function PullRequestSummaryTab({
                 />
               ) : null}
             </span>
-          </MetaRow>
+          </PullRequestMetaRow>
           {/* The row is shown empty only where a label could be put on it from here; on a host
               with none to offer, an empty row is a row about nothing. */}
           {detail.labels.length > 0 || detail.capabilities.labels === true ? (
-            <MetaRow icon={<TagIcon className="size-3.5" />} label="Labels">
+            <PullRequestMetaRow icon={<TagIcon className="size-3.5" />} label="Labels">
               <span className="flex min-w-0 flex-wrap items-center gap-1">
                 {detail.labels.length === 0 ? (
                   <span className="text-muted-foreground">None</span>
@@ -818,12 +717,12 @@ export function PullRequestSummaryTab({
                   />
                 ) : null}
               </span>
-            </MetaRow>
+            </PullRequestMetaRow>
           ) : null}
         </div>
       </section>
 
-      <Section key={`description:${detail.url}`} title="Description" keepMounted>
+      <PullRequestSummarySection key={`description:${detail.url}`} title="Description" keepMounted>
         <div className="group">
           {bodyScope === detail.url ? (
             <PullRequestMarkdownEditor
@@ -857,9 +756,9 @@ export function PullRequestSummaryTab({
             </div>
           )}
         </div>
-      </Section>
+      </PullRequestSummarySection>
 
-      <Section key={`checks:${detail.url}`} title="Checks" defaultOpen={false}>
+      <PullRequestSummarySection key={`checks:${detail.url}`} title="Checks" defaultOpen={false}>
         {checksStale ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>Check details are out of date.</span>
@@ -915,9 +814,9 @@ export function PullRequestSummaryTab({
             );
           })
         )}
-      </Section>
+      </PullRequestSummarySection>
 
-      <Section
+      <PullRequestSummarySection
         title={`Comments (${detail.commentCount})`}
         actions={
           <Button
@@ -1050,7 +949,7 @@ export function PullRequestSummaryTab({
             )}
           </>
         )}
-      </Section>
+      </PullRequestSummarySection>
     </div>
   );
 }
