@@ -22,8 +22,8 @@ export const SOURCE_CONTROL_TAB_LABELS: Record<SourceControlTab, string> = {
 };
 
 const SOURCE_CONTROL_TABS = [
-  { value: "pull-requests", Icon: PullRequestGlyph.pullRequest },
   { value: "issues", Icon: CircleDotIcon },
+  { value: "pull-requests", Icon: PullRequestGlyph.pullRequest },
 ] as const;
 
 /** The page's two lists, as a repository host lays them out: a row of tabs over the content. */
