@@ -141,6 +141,8 @@ The **Issues** tab on the Source Control page lists a project's GitHub issues, o
 Choose the project and whether to read the `origin` or `upstream` remote from the filters. Open an
 issue to read it beside the list, then use **Start thread** to open a new thread in a worktree based
 on the default branch, with a link to the issue in the composer.
+You can edit that draft's template in **Settings > Source control > Issue threads**. Select a
+project there to give it its own template; otherwise it inherits the environment's template.
 
 ## Troubleshooting
 

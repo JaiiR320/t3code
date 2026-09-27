@@ -1,4 +1,5 @@
 import type { IssueDetailResult, PullRequestActor, RepositoryIssue } from "@t3tools/contracts";
+import { DEFAULT_ISSUE_THREAD_PROMPT_TEMPLATE } from "@t3tools/contracts/settings";
 import { CircleCheckIcon, CircleDotIcon, type LucideIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
@@ -42,13 +43,19 @@ export function issueProfileUrl(login: string, issueUrl: string) {
 }
 
 /** The composer's starting point for a thread on an issue: a link to it and how to read it. */
-export function issueThreadPrompt(detail: IssueDetailResult) {
+export function issueThreadPrompt(
+  detail: IssueDetailResult,
+  template = DEFAULT_ISSUE_THREAD_PROMPT_TEMPLATE,
+) {
   const { issue } = detail;
-  return [
-    `Work on #${issue.number}: ${issue.title}`,
-    "",
-    issue.url,
-    "",
-    `Read the issue and its comments with \`gh issue view ${issue.number} --repo ${detail.repository} --comments\` before making changes.`,
-  ].join("\n");
+  const values: Record<string, string> = {
+    number: String(issue.number),
+    title: issue.title,
+    url: issue.url,
+    repository: detail.repository,
+  };
+  return template.replace(
+    /\{\{(number|title|url|repository)\}\}/g,
+    (token, key: string) => values[key] ?? token,
+  );
 }

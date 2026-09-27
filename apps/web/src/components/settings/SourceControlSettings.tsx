@@ -58,6 +58,7 @@ import {
 } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
+import { IssueThreadSettingsSection } from "./IssueThreadSettings";
 import {
   PolicyTooltip,
   SettingResetButton,
@@ -600,6 +601,7 @@ export function SourceControlSettingsPanel() {
       )}
 
       <SourceControlWritingSettingsSection />
+      <IssueThreadSettingsSection />
     </SettingsPageContainer>
   );
 }

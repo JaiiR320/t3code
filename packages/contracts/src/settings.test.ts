@@ -6,6 +6,7 @@ import {
   ClientSettingsSchema,
   ClientSettingsPatch,
   ClaudeSettings,
+  DEFAULT_ISSUE_THREAD_PROMPT_TEMPLATE,
   DEFAULT_SERVER_SETTINGS,
   resolveProviderInstanceEnabled,
   ServerSettings,
@@ -19,6 +20,28 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+
+describe("GitHub issue thread prompt", () => {
+  it("defaults existing settings and accepts a per-project template", () => {
+    expect(decodeServerSettings({}).issueThreadPromptTemplate).toBe(
+      DEFAULT_ISSUE_THREAD_PROMPT_TEMPLATE,
+    );
+    const settings = decodeServerSettings({
+      projectSettingsOverrides: { project: { issueThreadPromptTemplate: "Fix {{url}}" } },
+    });
+    expect(Object.values(settings.projectSettingsOverrides)[0]?.issueThreadPromptTemplate).toBe(
+      "Fix {{url}}",
+    );
+    expect(
+      Object.values(encodeServerSettings(settings).projectSettingsOverrides ?? {})[0]
+        ?.issueThreadPromptTemplate,
+    ).toBe("Fix {{url}}");
+  });
+
+  it("rejects an empty template", () => {
+    expect(() => decodeServerSettingsPatch({ issueThreadPromptTemplate: "  " })).toThrow();
+  });
+});
 
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {

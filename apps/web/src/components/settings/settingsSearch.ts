@@ -722,6 +722,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
   },
   {
+    id: "issue-thread-prompt",
+    title: "GitHub issue thread prompt",
+    to: "/settings/source-control",
+    scope: "project-defaults",
+    searchTerms: ["start thread issue prompt template project composer"],
+  },
+  {
     id: "project-actions",
     title: "Actions",
     to: "/settings/projects",

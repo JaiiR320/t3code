@@ -1,5 +1,7 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, IssueDetailResult, IssueScope } from "@t3tools/contracts";
+import { DEFAULT_ISSUE_THREAD_PROMPT_TEMPLATE } from "@t3tools/contracts/settings";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   ExternalLinkIcon,
   GitBranchPlusIcon,
@@ -14,7 +16,7 @@ import { useComposerDraftStore } from "~/composerDraftStore";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
-import { useProjects } from "~/state/entities";
+import { useProjects, useServerConfigs } from "~/state/entities";
 import { issueDetail } from "~/state/issues";
 import { useEnvironmentQuery } from "~/state/query";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
@@ -70,6 +72,11 @@ export function IssueDetailPanel({
   const project = useProjects().find(
     (item) => item.environmentId === environmentId && item.id === scope.projectId,
   );
+  const serverConfig = useServerConfigs().get(environmentId);
+  const promptTemplate = serverConfig
+    ? resolveProjectSettings(serverConfig.settings, scope.projectId).settings
+        .issueThreadPromptTemplate
+    : DEFAULT_ISSUE_THREAD_PROMPT_TEMPLATE;
   const [commentPages, setCommentPages] = useState(1);
   const markdownContext = useMemo(
     () =>
@@ -95,7 +102,7 @@ export function IssueDetailPanel({
     }
     useComposerDraftStore
       .getState()
-      .setPrompt(opened.draftId, issueThreadPrompt(issueDetailResult));
+      .setPrompt(opened.draftId, issueThreadPrompt(issueDetailResult, promptTemplate));
   };
 
   const cwd = project?.workspaceRoot ?? null;
