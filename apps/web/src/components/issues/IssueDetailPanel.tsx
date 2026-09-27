@@ -17,7 +17,7 @@ import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import { useProjects, useServerConfigs } from "~/state/entities";
-import { issueDetail } from "~/state/issues";
+import { issueDetail, issueDetailInput } from "~/state/issues";
 import { useEnvironmentQuery } from "~/state/query";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { Badge } from "../ui/badge";
@@ -49,6 +49,7 @@ import {
   issueProfileUrl,
   issueThreadPrompt,
 } from "./issuePresentation";
+import { IssueAssigneePicker, IssueLabelPicker, useIssueMetadata } from "./IssueMetadataPickers";
 
 type IssueComment = IssueDetailResult["comments"][number];
 
@@ -66,7 +67,7 @@ export function IssueDetailPanel({
   number: number;
 }) {
   const detailQuery = useEnvironmentQuery(
-    issueDetail({ environmentId, input: { ...scope, number, page: 1 } }),
+    issueDetail({ environmentId, input: issueDetailInput(scope, number, 1) }),
   );
   const detail = detailQuery.data;
   const project = useProjects().find(
@@ -173,7 +174,7 @@ export function IssueDetailPanel({
             <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
               <PullRequestActorLabel
                 actor={issueActor(detail.issue.author)}
-                profileUrl={issueProfileUrl(detail.issue.author, detail.issue.url)}
+                profileUrl={issueProfileUrl(detail.issue.author.login, detail.issue.url)}
                 variant="avatar"
                 className="shrink-0"
               />
@@ -206,7 +207,7 @@ export function IssueDetailPanel({
                 </span>
                 <PullRequestActorLabel
                   actor={issueActor(detail.issue.author)}
-                  profileUrl={issueProfileUrl(detail.issue.author, detail.issue.url)}
+                  profileUrl={issueProfileUrl(detail.issue.author.login, detail.issue.url)}
                 />
                 <span>opened {formatRelativeTimeLabel(detail.issue.createdAt)}</span>
               </PullRequestMetaLine>
@@ -228,32 +229,13 @@ export function IssueDetailPanel({
           <div className="h-full overflow-y-auto" data-pull-request-summary-scroll>
             <section className="px-4 pt-2.5 pb-1">
               <div className="space-y-2">
-                <PullRequestMetaRow icon={<UsersIcon className="size-3.5" />} label="Assignees">
-                  {detail.assignees.length ? (
-                    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                      {detail.assignees.map((login) => (
-                        <PullRequestActorLabel
-                          key={login}
-                          actor={issueActor(login)}
-                          profileUrl={issueProfileUrl(login, detail.issue.url)}
-                        />
-                      ))}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">None</span>
-                  )}
-                </PullRequestMetaRow>
-                <PullRequestMetaRow icon={<TagIcon className="size-3.5" />} label="Labels">
-                  {detail.issue.labels.length ? (
-                    <span className="flex min-w-0 flex-wrap gap-1">
-                      {detail.issue.labels.map((label) => (
-                        <PullRequestLabelChip key={label.name} label={label} />
-                      ))}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">None</span>
-                  )}
-                </PullRequestMetaRow>
+                <IssueMetadataRows
+                  key={detail.issue.url}
+                  environmentId={environmentId}
+                  scope={scope}
+                  detail={detail}
+                  detailUpdatedAt={detailQuery.dataUpdatedAt}
+                />
                 <PullRequestMetaRow icon={<MilestoneIcon className="size-3.5" />} label="Milestone">
                   {detail.milestone ?? <span className="text-muted-foreground">None</span>}
                 </PullRequestMetaRow>
@@ -313,6 +295,57 @@ export function IssueDetailPanel({
         <IssueDetailGhost />
       )}
     </SourceControlDetailChrome>
+  );
+}
+
+function IssueMetadataRows({
+  environmentId,
+  scope,
+  detail,
+  detailUpdatedAt,
+}: {
+  environmentId: EnvironmentId;
+  scope: IssueScope;
+  detail: IssueDetailResult;
+  detailUpdatedAt: number | null;
+}) {
+  const metadata = useIssueMetadata({ environmentId, scope, detail, detailUpdatedAt });
+  return (
+    <>
+      <PullRequestMetaRow icon={<UsersIcon className="size-3.5" />} label="Assignees">
+        <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          {metadata.assignees.length === 0 ? (
+            <span className="text-muted-foreground">None</span>
+          ) : (
+            metadata.assignees.map((assignee) => (
+              <PullRequestActorLabel
+                key={assignee.login}
+                actor={issueActor(assignee)}
+                profileUrl={issueProfileUrl(assignee.login, detail.issue.url)}
+              />
+            ))
+          )}
+          <IssueAssigneePicker environmentId={environmentId} scope={scope} metadata={metadata} />
+        </span>
+      </PullRequestMetaRow>
+      <PullRequestMetaRow icon={<TagIcon className="size-3.5" />} label="Labels">
+        <span className="flex min-w-0 flex-wrap items-center gap-1">
+          {metadata.labels.length === 0 ? (
+            <span className="text-muted-foreground">None</span>
+          ) : (
+            metadata.labels.map((label) => (
+              <PullRequestLabelChip
+                key={label.name}
+                label={label}
+                size="default"
+                className="max-w-48"
+              />
+            ))
+          )}
+          <IssueLabelPicker environmentId={environmentId} scope={scope} metadata={metadata} />
+        </span>
+      </PullRequestMetaRow>
+    </>
   );
 }
 
@@ -376,11 +409,11 @@ function IssueComments({
         <>
           <PullRequestCommentIdentity
             actor={issueActor(comment.author)}
-            profileUrl={issueProfileUrl(comment.author, detail.issue.url)}
+            profileUrl={issueProfileUrl(comment.author.login, detail.issue.url)}
             createdAt={comment.createdAt}
             url={`${detail.issue.url}#issuecomment-${comment.id}`}
           />
-          {comment.author === detail.issue.author ? (
+          {comment.author.login === detail.issue.author.login ? (
             <Badge variant="outline" size="sm">
               Author
             </Badge>
@@ -418,7 +451,7 @@ function IssueCommentPage({
   onLoadMore: () => void;
 }) {
   const query = useEnvironmentQuery(
-    issueDetail({ environmentId, input: { ...scope, number, page } }),
+    issueDetail({ environmentId, input: issueDetailInput(scope, number, page) }),
   );
   if (query.error && !query.data) {
     return (

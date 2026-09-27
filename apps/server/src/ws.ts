@@ -2755,6 +2755,8 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.issuesList]: (input) => issues.list(input),
         [WS_METHODS.issuesDetail]: (input) => issues.detail(input),
+        [WS_METHODS.issuesMetadataCandidates]: (input) => issues.metadataCandidates(input),
+        [WS_METHODS.issuesSetMetadata]: (input) => issues.setMetadata(input),
         [WS_METHODS.pullRequestsList]: (input) =>
           observeRpcEffect(WS_METHODS.pullRequestsList, pullRequests.list(input), {
             "rpc.aggregate": "pull-requests",

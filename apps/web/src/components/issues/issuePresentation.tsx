@@ -1,4 +1,9 @@
-import type { IssueDetailResult, PullRequestActor, RepositoryIssue } from "@t3tools/contracts";
+import type {
+  IssueActor,
+  IssueDetailResult,
+  PullRequestActor,
+  RepositoryIssue,
+} from "@t3tools/contracts";
 import { DEFAULT_ISSUE_THREAD_PROMPT_TEMPLATE } from "@t3tools/contracts/settings";
 import { CircleCheckIcon, CircleDotIcon, type LucideIcon } from "lucide-react";
 
@@ -33,9 +38,9 @@ export function IssueGlyph({
   return <Icon aria-hidden className={cn("size-4 shrink-0", toneClassName, className)} />;
 }
 
-/** Issues only report a login, so the shared actor components fall back to initials. */
-export function issueActor(login: string): PullRequestActor {
-  return { login, name: null, avatarUrl: null };
+/** Issues report no display name, so the shared actor components show the login. */
+export function issueActor({ login, avatarUrl }: IssueActor): PullRequestActor {
+  return { login, name: null, avatarUrl };
 }
 
 export function issueProfileUrl(login: string, issueUrl: string) {

@@ -3,7 +3,10 @@ import {
   IssueListResult,
   IssueDetailInput,
   IssueDetailResult,
+  IssueMetadataCandidates,
+  IssueMetadataChangeInput,
   IssueReadError,
+  IssueScope,
 } from "./issue.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
@@ -400,6 +403,8 @@ export const WS_METHODS = {
   // Pull request methods
   issuesList: "issues.list",
   issuesDetail: "issues.detail",
+  issuesMetadataCandidates: "issues.metadataCandidates",
+  issuesSetMetadata: "issues.setMetadata",
   pullRequestsList: "pullRequests.list",
   pullRequestsListStats: "pullRequests.listStats",
   pullRequestsSummary: "pullRequests.summary",
@@ -713,6 +718,16 @@ const WsIssuesListRpc = Rpc.make(WS_METHODS.issuesList, {
 const WsIssuesDetailRpc = Rpc.make(WS_METHODS.issuesDetail, {
   payload: IssueDetailInput,
   success: IssueDetailResult,
+  error: Schema.Union([IssueReadError, EnvironmentAuthorizationError]),
+});
+const WsIssuesMetadataCandidatesRpc = Rpc.make(WS_METHODS.issuesMetadataCandidates, {
+  payload: IssueScope,
+  success: IssueMetadataCandidates,
+  error: Schema.Union([IssueReadError, EnvironmentAuthorizationError]),
+});
+const WsIssuesSetMetadataRpc = Rpc.make(WS_METHODS.issuesSetMetadata, {
+  payload: IssueMetadataChangeInput,
+  success: Schema.Void,
   error: Schema.Union([IssueReadError, EnvironmentAuthorizationError]),
 });
 
@@ -1451,6 +1466,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsCloudInstallRelayClientRpc,
   WsIssuesListRpc,
   WsIssuesDetailRpc,
+  WsIssuesMetadataCandidatesRpc,
+  WsIssuesSetMetadataRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsSummaryRpc,

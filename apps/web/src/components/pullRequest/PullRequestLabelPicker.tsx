@@ -101,27 +101,34 @@ export function PullRequestLabelPicker({
       disabled={pending !== null}
       onSelect={(candidate) => void toggle(candidate)}
     >
-      {(candidate) => {
-        const dot = pullRequestLabelColor(candidate.color);
-        return (
-          <>
-            <span
-              aria-hidden
-              className="size-2 shrink-0 rounded-full bg-muted-foreground"
-              {...(dot ? { style: { backgroundColor: dot } } : {})}
-            />
-            <span className="min-w-0 flex-1 truncate">
-              {candidate.name}
-              {candidate.description ? (
-                <span className="text-muted-foreground"> · {candidate.description}</span>
-              ) : null}
-            </span>
-            {candidate.isApplied ? (
-              <CheckIcon aria-label="Applied" className="size-3.5 shrink-0" />
-            ) : null}
-          </>
-        );
-      }}
+      {(candidate) => <LabelCandidateRow label={candidate} applied={candidate.isApplied} />}
     </PullRequestCandidatePicker>
+  );
+}
+
+/** One label in a picker: its colour, name and description, checked when already applied. */
+export function LabelCandidateRow({
+  label,
+  applied,
+}: {
+  label: { name: string; color: string | null; description: string | null };
+  applied: boolean;
+}) {
+  const dot = pullRequestLabelColor(label.color);
+  return (
+    <>
+      <span
+        aria-hidden
+        className="size-2 shrink-0 rounded-full bg-muted-foreground"
+        {...(dot ? { style: { backgroundColor: dot } } : {})}
+      />
+      <span className="min-w-0 flex-1 truncate">
+        {label.name}
+        {label.description ? (
+          <span className="text-muted-foreground"> · {label.description}</span>
+        ) : null}
+      </span>
+      {applied ? <CheckIcon aria-label="Applied" className="size-3.5 shrink-0" /> : null}
+    </>
   );
 }

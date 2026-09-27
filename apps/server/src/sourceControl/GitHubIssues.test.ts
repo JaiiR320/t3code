@@ -28,12 +28,12 @@ const rawIssue = {
   title: "Example issue",
   html_url: "https://github.com/team/repo/issues/42",
   state: "open",
-  user: { login: "jair" },
+  user: { login: "jair", avatar_url: "https://avatars/jair" },
   created_at: "2026-09-01T00:00:00Z",
   labels: [{ name: "bug", color: "ff0000" }],
   comments: 1,
   body: "Issue description",
-  assignees: [{ login: "jair" }],
+  assignees: [{ login: "jair", avatar_url: "https://avatars/jair" }],
   milestone: { title: "Next" },
 };
 
@@ -120,9 +120,15 @@ it.effect("loads issue Markdown, metadata and paginated comments, including dele
     });
     const result = yield* service.detail({ ...scope, number: 42, page: 1 });
     assert.strictEqual(result.body, "Issue description");
-    assert.deepStrictEqual(result.assignees, ["jair"]);
+    assert.deepStrictEqual(result.issue.author, {
+      login: "jair",
+      avatarUrl: "https://avatars/jair",
+    });
+    assert.deepStrictEqual(result.assignees, [
+      { login: "jair", avatarUrl: "https://avatars/jair" },
+    ]);
     assert.strictEqual(result.milestone, "Next");
-    assert.strictEqual(result.comments[0]?.author, "ghost");
+    assert.deepStrictEqual(result.comments[0]?.author, { login: "ghost", avatarUrl: null });
     assert.strictEqual(result.comments[0]?.body, "A reply");
     assert.strictEqual(result.nextPage, null);
   }),
@@ -177,5 +183,72 @@ it.effect("rejects a pull request opened through the issue detail route", () =>
     });
     const error = yield* service.detail({ ...scope, number: 42, page: 1 }).pipe(Effect.flip);
     assert.match(error.message, /pull request/);
+  }),
+);
+
+it.effect("reads label and assignee candidates and says when either list is cut short", () =>
+  Effect.gen(function* () {
+    const service = make({
+      projects: { getProjectShellById: () => Effect.succeedSome(project) },
+      vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
+      gh: {
+        execute: (input) =>
+          Effect.succeed(
+            output(
+              JSON.stringify(
+                input.args.at(-1)?.startsWith("repos/team/repo/labels?")
+                  ? [{ name: "bug", color: "ff0000", description: null }]
+                  : Array.from({ length: 100 }, (_, index) => ({
+                      login: `user${index}`,
+                      avatar_url: `https://avatars/${index}`,
+                    })),
+              ),
+            ),
+          ),
+      },
+    });
+    const result = yield* service.metadataCandidates(scope);
+    assert.deepStrictEqual(result.labels, [{ name: "bug", color: "ff0000", description: null }]);
+    assert.deepStrictEqual(result.assignees[0], { login: "user0", avatarUrl: "https://avatars/0" });
+    assert.strictEqual(result.labelsTruncated, false);
+    assert.strictEqual(result.assigneesTruncated, true);
+  }),
+);
+
+it.effect("changes labels and assignees with bodies on stdin", () =>
+  Effect.gen(function* () {
+    const calls: Array<{ args: string; stdin: string | undefined }> = [];
+    const service = make({
+      projects: { getProjectShellById: () => Effect.succeedSome(project) },
+      vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
+      gh: {
+        execute: (input) => {
+          calls.push({ args: input.args.join(" "), stdin: input.stdin });
+          return Effect.succeed(output("{}"));
+        },
+      },
+    });
+    const change = { ...scope, number: 42 };
+    yield* service.setMetadata({ ...change, field: "labels", names: ["bug"], applied: true });
+    yield* service.setMetadata({
+      ...change,
+      field: "labels",
+      names: ["needs triage", "a/b"],
+      applied: false,
+    });
+    yield* service.setMetadata({ ...change, field: "assignees", names: ["jair"], applied: false });
+    const issue = "--hostname github.com repos/team/repo/issues/42";
+    assert.deepStrictEqual(calls, [
+      {
+        args: `api --method POST ${issue}/labels --input -`,
+        stdin: '{"labels":["bug"]}',
+      },
+      { args: `api --method DELETE ${issue}/labels/needs%20triage`, stdin: undefined },
+      { args: `api --method DELETE ${issue}/labels/a%2Fb`, stdin: undefined },
+      {
+        args: `api --method DELETE ${issue}/assignees --input -`,
+        stdin: '{"assignees":["jair"]}',
+      },
+    ]);
   }),
 );

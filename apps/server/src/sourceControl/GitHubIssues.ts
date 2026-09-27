@@ -3,6 +3,7 @@ import {
   type IssueScope,
   type IssueListInput,
   type IssueDetailInput,
+  type IssueMetadataChangeInput,
 } from "@t3tools/contracts";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as Effect from "effect/Effect";
@@ -12,7 +13,8 @@ import type { ProjectionSnapshotQuery } from "../orchestration/Services/Projecti
 import type { VcsProcess } from "../vcs/VcsProcess.ts";
 import type { GitHubCli } from "./GitHubCli.ts";
 
-const Actor = Schema.NullOr(Schema.Struct({ login: Schema.String }));
+const RawActor = Schema.Struct({ login: Schema.String, avatar_url: Schema.String });
+const Actor = Schema.NullOr(RawActor);
 const RawIssue = Schema.Struct({
   number: Schema.Int,
   title: Schema.String,
@@ -23,7 +25,7 @@ const RawIssue = Schema.Struct({
   labels: Schema.Array(Schema.Struct({ name: Schema.String, color: Schema.String })),
   comments: Schema.Int,
   body: Schema.NullOr(Schema.String),
-  assignees: Schema.Array(Schema.Struct({ login: Schema.String })),
+  assignees: Schema.Array(RawActor),
   milestone: Schema.NullOr(Schema.Struct({ title: Schema.String })),
   pull_request: Schema.optionalKey(Schema.Unknown),
 });
@@ -34,6 +36,7 @@ const RawComment = Schema.Struct({
   created_at: Schema.String,
 });
 const PAGE_SIZE = 50;
+const CANDIDATE_PAGE_SIZE = 100;
 const decodeIssue = Schema.decodeEffect(Schema.fromJsonString(RawIssue));
 const decodeComments = Schema.decodeEffect(Schema.fromJsonString(Schema.Array(RawComment)));
 const decodeSearch = Schema.decodeEffect(
@@ -45,20 +48,40 @@ const decodeSearch = Schema.decodeEffect(
     }),
   ),
 );
+const decodeLabels = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        color: Schema.String,
+        description: Schema.NullOr(Schema.String),
+      }),
+    ),
+  ),
+);
+const decodeAssignees = Schema.decodeEffect(Schema.fromJsonString(Schema.Array(RawActor)));
+const ChangeBody = Schema.Union([
+  Schema.Struct({ labels: Schema.Array(Schema.String) }),
+  Schema.Struct({ assignees: Schema.Array(Schema.String) }),
+]);
+const encodeChange = Schema.encodeSync(Schema.fromJsonString(ChangeBody));
 const isIssueReadError = Schema.is(IssueReadError);
+
+const actor = (raw: typeof RawActor.Type | null) =>
+  raw ? { login: raw.login, avatarUrl: raw.avatar_url } : { login: "ghost", avatarUrl: null };
 
 const summary = (issue: typeof RawIssue.Type) => ({
   number: issue.number,
   title: issue.title,
   url: issue.html_url,
   state: issue.state,
-  author: issue.user?.login ?? "ghost",
+  author: actor(issue.user),
   createdAt: issue.created_at,
   labels: issue.labels,
   commentCount: issue.comments,
 });
 
-/** Read-only GitHub prototype. Resolve each remote on the owning server, including worktrees. */
+/** GitHub-only. Resolve each remote on the owning server, including worktrees. */
 export function make({
   projects,
   vcs,
@@ -107,6 +130,28 @@ export function make({
     });
     return output.stdout;
   });
+  /** Bodies go over stdin, never argv, where process listings and failure messages echo them. */
+  const write = Effect.fn("GitHubIssues.write")(function* (
+    cwd: string,
+    method: "POST" | "DELETE",
+    endpoint: string,
+    body?: typeof ChangeBody.Type,
+  ) {
+    yield* gh.execute({
+      cwd,
+      args: [
+        "api",
+        "--method",
+        method,
+        "--hostname",
+        "github.com",
+        endpoint,
+        ...(body ? ["--input", "-"] : []),
+      ],
+      ...(body ? { stdin: encodeChange(body) } : {}),
+      rateLimitHost: "github.com",
+    });
+  });
   const readError = (error: { readonly message: string }) =>
     isIssueReadError(error) ? error : new IssueReadError({ message: error.message });
 
@@ -150,11 +195,11 @@ export function make({
       repository,
       issue: summary(issue),
       body: issue.body ?? "",
-      assignees: issue.assignees.map((actor) => actor.login),
+      assignees: issue.assignees.map(actor),
       milestone: issue.milestone?.title ?? null,
       comments: comments.map((comment) => ({
         id: comment.id,
-        author: comment.user?.login ?? "ghost",
+        author: actor(comment.user),
         body: comment.body,
         createdAt: comment.created_at,
       })),
@@ -162,5 +207,48 @@ export function make({
     };
   }, Effect.mapError(readError));
 
-  return { list, detail };
+  /** Read when a label or assignee menu opens: both lists in one trip, shared by both menus. */
+  const metadataCandidates = Effect.fn("GitHubIssues.metadataCandidates")(function* (
+    input: IssueScope,
+  ) {
+    const { cwd, repository } = yield* resolve(input);
+    const [labels, assignees] = yield* Effect.all(
+      [
+        api(cwd, `repos/${repository}/labels?per_page=${CANDIDATE_PAGE_SIZE}`).pipe(
+          Effect.flatMap(decodeLabels),
+        ),
+        api(cwd, `repos/${repository}/assignees?per_page=${CANDIDATE_PAGE_SIZE}`).pipe(
+          Effect.flatMap(decodeAssignees),
+        ),
+      ],
+      { concurrency: 2 },
+    );
+    return {
+      labels,
+      assignees: assignees.map(actor),
+      labelsTruncated: labels.length === CANDIDATE_PAGE_SIZE,
+      assigneesTruncated: assignees.length === CANDIDATE_PAGE_SIZE,
+    };
+  }, Effect.mapError(readError));
+
+  const setMetadata = Effect.fn("GitHubIssues.setMetadata")(function* (
+    input: IssueMetadataChangeInput,
+  ) {
+    const { cwd, repository } = yield* resolve(input);
+    const endpoint = `repos/${repository}/issues/${input.number}/${input.field}`;
+    if (input.field === "assignees") {
+      return yield* write(cwd, input.applied ? "POST" : "DELETE", endpoint, {
+        assignees: input.names,
+      });
+    }
+    if (input.applied) return yield* write(cwd, "POST", endpoint, { labels: input.names });
+    // The label endpoint takes one name in its path, which may carry a space or a slash.
+    yield* Effect.forEach(
+      input.names,
+      (name) => write(cwd, "DELETE", `${endpoint}/${encodeURIComponent(name)}`),
+      { discard: true },
+    );
+  }, Effect.mapError(readError));
+
+  return { list, detail, metadataCandidates, setMetadata };
 }

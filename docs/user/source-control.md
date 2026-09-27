@@ -140,7 +140,8 @@ does not show its diff, so marks are made and read on web and desktop.
 The **Issues** tab on the Source Control page lists a project's GitHub issues, one project at a time.
 Choose the project and whether to read the `origin` or `upstream` remote from the filters. Open an
 issue to read it beside the list, then use **Start thread** to open a new thread in a worktree based
-on the default branch, with a link to the issue in the composer.
+on the default branch, with a link to the issue in the composer. Add or remove assignees and labels
+from their rows at the top of the issue; this needs triage access on the repository.
 You can edit that draft's template in **Settings > Source control > Issue threads**. Select a
 project there to give it its own template; otherwise it inherits the environment's template.
 
