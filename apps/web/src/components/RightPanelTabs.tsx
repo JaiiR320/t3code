@@ -41,7 +41,7 @@ import {
 
 import { isElectron } from "~/env";
 import type { DesktopPreviewOverlay } from "~/previewStateStore";
-import type { RightPanelSurface } from "~/rightPanelStore";
+import type { IssueSurface, RightPanelSurface } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import { Button } from "~/components/ui/button";
@@ -70,6 +70,8 @@ import {
   useSharedPullRequestSummary,
 } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
+import { issueDetail } from "~/state/issues";
+import { IssueGlyph } from "./issues/issuePresentation";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
@@ -625,6 +627,7 @@ function surfaceTitle(
         getTerminalLabel(surface.activeTerminalId)
       );
     case "pull-request":
+    case "issue":
       return `#${surface.number}`;
     case "pull-requests":
       return "Pull requests";
@@ -713,6 +716,8 @@ function SurfaceIcon({
       );
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
+    case "issue":
+      return <IssueSurfaceIcon surface={surface} />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
     case "device":
@@ -822,6 +827,27 @@ function PullRequestSurfaceIcon({
     isDraft: status.isDraft ?? detail?.isDraft ?? seed?.isDraft ?? false,
   });
   return <presentation.Icon className={cn("size-3 shrink-0", presentation.toneClassName)} />;
+}
+
+/** The issue's state once its detail is read, which the open tab has already asked for. */
+function IssueSurfaceIcon({ surface }: { surface: IssueSurface }) {
+  const detail = useEnvironmentQuery(
+    issueDetail({
+      environmentId: surface.environmentId as EnvironmentId,
+      input: {
+        projectId: surface.projectId as ProjectId,
+        remote: surface.remote,
+        number: surface.number,
+        page: 1,
+      },
+    }),
+  ).data;
+  return (
+    <IssueGlyph
+      state={detail?.issue.state ?? "open"}
+      className={cn("size-3", detail === null && "text-muted-foreground")}
+    />
+  );
 }
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
