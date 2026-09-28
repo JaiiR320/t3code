@@ -3230,6 +3230,52 @@ it.effect("answers a repeated listing from cache, and concurrent readers share o
   }),
 );
 
+it.effect("reloads a listing while an abandoned read is still cleaning up", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const cleaningUp = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    let calls = 0;
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          listChangeRequests: () =>
+            Effect.suspend(() => {
+              calls += 1;
+              return calls === 1
+                ? Deferred.succeed(started, undefined).pipe(
+                    Effect.andThen(Effect.never),
+                    Effect.ensuring(
+                      Deferred.succeed(cleaningUp, undefined).pipe(
+                        Effect.andThen(Deferred.await(release)),
+                      ),
+                    ),
+                  )
+                : Effect.succeed({
+                    items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+                    truncated: false,
+                    continues: false,
+                  });
+            }),
+        }),
+      ],
+    });
+    const input = { state: "open" } as const;
+    const abandoned = yield* service.list(input).pipe(Effect.forkChild);
+    yield* Deferred.await(started);
+    const cancel = yield* Fiber.interrupt(abandoned).pipe(Effect.forkChild);
+    yield* Deferred.await(cleaningUp);
+    const replacement = yield* service
+      .list(input)
+      .pipe(Effect.forkChild({ startImmediately: true }));
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(cancel);
+    assert.strictEqual((yield* Fiber.join(replacement)).entries[0]?.number, 1);
+    assert.strictEqual(calls, 2);
+  }),
+);
+
 it.effect("shares one cold viewer lookup across distinct concurrent lists", () =>
   Effect.gen(function* () {
     let viewerCalls = 0;

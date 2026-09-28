@@ -5,6 +5,7 @@ import {
 } from "@t3tools/shared/sourceControl";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -2854,7 +2855,12 @@ export const make = Effect.gen(function* () {
         ? null
         : Object.entries(input.cursors).toSorted(([left], [right]) => left.localeCompare(right)),
     ]);
-    return Cache.get(listCache, key);
+    // A replacement read can join an abandoned lookup before its cleanup finishes.
+    // Cache removes the interrupted entry on exit, so retry once for the live reader.
+    // External cancellation still interrupts this reader instead of entering the handler.
+    return Cache.get(listCache, key).pipe(
+      Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Cache.get(listCache, key)),
+    );
   };
 
   const detailCache = yield* Cache.makeWith(
