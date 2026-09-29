@@ -1,0 +1,4 @@
+interface:
+  display_name: "Update T3 Code"
+  short_description: "Update the fork, install, verify, then push"
+  default_prompt: "Use $update-t3-code to update my T3 Code fork from upstream, install the service and desktop app, and wait for my verification before pushing personal."
