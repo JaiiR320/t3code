@@ -184,6 +184,50 @@ export function findProjectOnChangeRequestHost(
   });
 }
 
+export interface GitHubIssueLink {
+  readonly repository: string;
+  readonly number: number;
+}
+
+/** A github.com issue URL, the only host the issue panel reads; null for anything else. */
+export function parseGitHubIssueUrl(targetUrl: string): GitHubIssueLink | null {
+  let url: URL;
+  try {
+    url = new URL(targetUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "github.com") return null;
+  const match = /^\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/|$)/u.exec(url.pathname);
+  const number = Number(match?.[2]);
+  return match?.[1] && Number.isSafeInteger(number) && number > 0
+    ? { repository: match[1].toLowerCase(), number }
+    : null;
+}
+
+/**
+ * The project whose origin or upstream remote is the issue's repository, and that remote. The
+ * server reads issues through a named remote, and the identity records which remote it came from.
+ */
+export function findIssueScope(
+  projects: ReadonlyArray<EnvironmentProject>,
+  link: GitHubIssueLink,
+): { project: EnvironmentProject; remote: "origin" | "upstream" } | null {
+  for (const project of projects) {
+    const identity = project.repositoryIdentity;
+    const remote = identity?.locator.remoteName;
+    if (
+      identity?.provider === "github" &&
+      (remote === "origin" || remote === "upstream") &&
+      canonicalRepositoryKey(identity.canonicalKey.toLowerCase()) ===
+        `github.com/${link.repository}`
+    ) {
+      return { project, remote };
+    }
+  }
+  return null;
+}
+
 /**
  * Opens a change request link on the page, and says whether it did. Anything else — another
  * organisation's repository, a host nothing here is checked out from, a link that merely looks
@@ -226,7 +270,9 @@ export function useOpenChangeRequestLink(
       const resolvedThreadRef = targetThreadRef ?? threadRef;
       const resolvedPanelRef = panelRef ?? resolvedThreadRef;
       const parsed = parseChangeRequestUrl(targetUrl);
-      if (parsed === null) return false;
+      // GitHub issues only open as a right panel tab; there is no issue page to navigate to.
+      const issue = parsed === null && resolvedPanelRef ? parseGitHubIssueUrl(targetUrl) : null;
+      if (parsed === null && issue === null) return false;
       const reads = (environmentId: string) =>
         serverConfigs.get(environmentId as EnvironmentId)?.environment.capabilities.pullRequests ===
         true;
@@ -247,6 +293,29 @@ export function useOpenChangeRequestLink(
                   Number(right.environmentId === primaryEnvironmentId) -
                   Number(left.environmentId === primaryEnvironmentId),
               );
+      if (parsed === null) {
+        const scope =
+          issue && resolvedPanelRef
+            ? findIssueScope(
+                projects.filter(
+                  (project) =>
+                    serverConfigs.get(project.environmentId)?.environment.capabilities.issues ===
+                    true,
+                ),
+                issue,
+              )
+            : null;
+        if (scope === null || !issue || !resolvedPanelRef) return false;
+        event.preventDefault();
+        event.stopPropagation();
+        useRightPanelStore.getState().openIssue(resolvedPanelRef, {
+          environmentId: scope.project.environmentId,
+          projectId: scope.project.id,
+          remote: scope.remote,
+          number: issue.number,
+        });
+        return true;
+      }
       const exactProject = findProjectForChangeRequest(projects, parsed);
       const project =
         exactProject ??

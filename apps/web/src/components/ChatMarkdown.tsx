@@ -3070,26 +3070,31 @@ const CHAT_MARKDOWN_COMPONENTS = {
         return link;
       }
       if (pullRequestPreviewTarget !== null) {
+        const openChangeRequestFromPreview = (targetUrl: string) =>
+          openChangeRequestLink(
+            {
+              metaKey: false,
+              ctrlKey: false,
+              preventDefault: () => undefined,
+              stopPropagation: () => undefined,
+            },
+            targetUrl,
+            undefined,
+            environmentId ?? undefined,
+          );
         return (
           <PullRequestLinkPreview
             link={link}
             originalUrl={href}
             target={pullRequestPreviewTarget}
             confirmBeforeOpen={confirmBeforeOpen}
-            onOpenPullRequest={(targetUrl) =>
-              openChangeRequestLink(
-                {
-                  metaKey: false,
-                  ctrlKey: false,
-                  preventDefault: () => undefined,
-                  stopPropagation: () => undefined,
-                },
-                targetUrl,
-                undefined,
-                environmentId ?? undefined,
-              )
-            }
-            onOpenFallback={openDeferredMarkdownLink}
+            onOpenPullRequest={openChangeRequestFromPreview}
+            // A reference that is not a pull request may still be an issue for the panel.
+            onOpenFallback={async (targetUrl) => {
+              if (!openChangeRequestFromPreview(targetUrl)) {
+                await openDeferredMarkdownLink(targetUrl);
+              }
+            }}
           />
         );
       }

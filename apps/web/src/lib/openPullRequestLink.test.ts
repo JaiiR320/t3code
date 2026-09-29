@@ -2,11 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   changeRequestRepositoryUrl,
+  findIssueScope,
   findProjectForChangeRequest,
   findProjectOnChangeRequestHost,
   gitHubPullRequestBrowserUrl,
   matchesLinkedPullRequestUrl,
   parseChangeRequestUrl,
+  parseGitHubIssueUrl,
   pullRequestCandidateUrlFromReferenceAutolink,
   shouldOpenPullRequestExternally,
 } from "./openPullRequestLink";
@@ -541,5 +543,62 @@ describe("findProjectForChangeRequest", () => {
         number: 1,
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("parseGitHubIssueUrl", () => {
+  it("reads a github.com issue, trailing segments and all", () => {
+    expect(parseGitHubIssueUrl("https://github.com/Weng-Lab/GenomeBrowser/issues/151")).toEqual({
+      repository: "weng-lab/genomebrowser",
+      number: 151,
+    });
+    expect(
+      parseGitHubIssueUrl("https://github.com/weng-lab/genomebrowser/issues/151#issuecomment-1"),
+    ).toEqual({ repository: "weng-lab/genomebrowser", number: 151 });
+  });
+
+  it.each([
+    "https://github.com/weng-lab/genomebrowser/pull/151",
+    "https://github.acme.test/weng-lab/genomebrowser/issues/151",
+    "https://github.com.evil.test/weng-lab/genomebrowser/issues/151",
+    "https://github.com/weng-lab/genomebrowser/issues",
+    "https://github.com/weng-lab/genomebrowser/issues/0",
+    "not a url",
+  ])("ignores %s", (url) => {
+    expect(parseGitHubIssueUrl(url)).toBeNull();
+  });
+});
+
+describe("findIssueScope", () => {
+  const project = (id: string, canonicalKey: string, remoteName: string, provider = "github") =>
+    ({
+      id,
+      repositoryIdentity: {
+        canonicalKey,
+        provider,
+        locator: { source: "git-remote", remoteName, remoteUrl: `https://${canonicalKey}.git` },
+      },
+    }) as never;
+  const link = { repository: "weng-lab/genomebrowser", number: 151 };
+
+  it("reads the issue through the remote the project's identity came from", () => {
+    const projects = [
+      project("other", "github.com/weng-lab/genomebrowser-app", "origin"),
+      project("fork", "github.com/Weng-Lab/GenomeBrowser", "upstream"),
+    ];
+    expect(findIssueScope(projects, link)).toEqual({ project: projects[1], remote: "upstream" });
+  });
+
+  it("finds nothing for another host, provider, or a remote the server cannot read", () => {
+    expect(
+      findIssueScope(
+        [
+          project("enterprise", "github.acme.test/weng-lab/genomebrowser", "origin"),
+          project("mirror", "github.com/weng-lab/genomebrowser", "mirror"),
+          project("gitlab", "github.com/weng-lab/genomebrowser", "origin", "gitlab"),
+        ],
+        link,
+      ),
+    ).toBeNull();
   });
 });
