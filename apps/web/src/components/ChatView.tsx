@@ -213,6 +213,7 @@ import {
 } from "../previewMiniPlayerStore";
 import { pullRequestPanelContext } from "./pullRequest/pullRequestDetail.logic";
 import { PullRequestDetailPanel } from "./pullRequest/PullRequestDetailPanel";
+import { IssueDetailPanel } from "./issues/IssueDetailPanel";
 import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
 import { RightPanelTabs } from "./RightPanelTabs";
@@ -9570,6 +9571,16 @@ export default function ChatView(props: ChatViewProps) {
           workspaceMutationId={workspaceMutationId}
         />
       </Suspense>
+    ) : renderedRightPanelSurface?.kind === "issue" ? (
+      <IssueDetailPanel
+        key={renderedRightPanelSurface.id}
+        environmentId={renderedRightPanelSurface.environmentId as EnvironmentId}
+        scope={{
+          projectId: renderedRightPanelSurface.projectId as ProjectId,
+          remote: renderedRightPanelSurface.remote,
+        }}
+        number={renderedRightPanelSurface.number}
+      />
     ) : renderedRightPanelSurface?.kind === "pull-request" && !pullRequestsCapabilityKnown ? (
       <PullRequestDetailGhost />
     ) : renderedRightPanelSurface?.kind === "pull-request" && !supportsPullRequests ? (
