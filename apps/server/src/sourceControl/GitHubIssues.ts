@@ -9,7 +9,7 @@ import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import type { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import type { ProjectService } from "../project/ProjectService.ts";
 import type { VcsProcess } from "../vcs/VcsProcess.ts";
 import type { GitHubCli } from "./GitHubCli.ts";
 
@@ -87,12 +87,12 @@ export function make({
   vcs,
   gh,
 }: {
-  projects: Pick<ProjectionSnapshotQuery["Service"], "getProjectShellById">;
+  projects: Pick<ProjectService["Service"], "getShell">;
   vcs: Pick<VcsProcess["Service"], "run">;
   gh: Pick<GitHubCli["Service"], "execute">;
 }) {
   const resolve = Effect.fn("GitHubIssues.resolve")(function* (input: IssueScope) {
-    const project = yield* projects.getProjectShellById(input.projectId);
+    const project = yield* projects.getShell(input.projectId);
     if (Option.isNone(project)) {
       return yield* new IssueReadError({ message: "This project is no longer available." });
     }

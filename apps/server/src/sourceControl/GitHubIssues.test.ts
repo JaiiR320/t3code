@@ -41,7 +41,7 @@ it.effect("reads the selected remote on the owning server and excludes pull requ
   Effect.gen(function* () {
     const reads: string[] = [];
     const service = make({
-      projects: { getProjectShellById: () => Effect.succeedSome(project) },
+      projects: { getShell: () => Effect.succeedSome(project) },
       vcs: {
         run: (input) => {
           assert.deepStrictEqual(input.args, ["remote", "get-url", "upstream"]);
@@ -81,7 +81,7 @@ it.effect("reads the selected remote on the owning server and excludes pull requ
 it.effect("paginates search results and stops at GitHub's 1,000-result limit", () =>
   Effect.gen(function* () {
     const service = make({
-      projects: { getProjectShellById: () => Effect.succeedSome(project) },
+      projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo.git")) },
       gh: {
         execute: () =>
@@ -103,7 +103,7 @@ it.effect("paginates search results and stops at GitHub's 1,000-result limit", (
 it.effect("loads issue Markdown, metadata and paginated comments, including deleted authors", () =>
   Effect.gen(function* () {
     const service = make({
-      projects: { getProjectShellById: () => Effect.succeedSome(project) },
+      projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
       gh: {
         execute: (input) =>
@@ -139,7 +139,7 @@ it.effect("does not call GitHub for a missing project or unsupported remote", ()
     for (const exists of [true, false]) {
       const service = make({
         projects: {
-          getProjectShellById: () => Effect.succeed(exists ? Option.some(project) : Option.none()),
+          getShell: () => Effect.succeed(exists ? Option.some(project) : Option.none()),
         },
         vcs: { run: () => Effect.succeed(output("https://gitlab.com/team/repo")) },
         gh: { execute: () => Effect.die("GitHub must not be called") },
@@ -154,7 +154,7 @@ it.effect("does not call GitHub for a missing project or unsupported remote", ()
 it.effect("returns an actionable authentication error", () =>
   Effect.gen(function* () {
     const service = make({
-      projects: { getProjectShellById: () => Effect.succeedSome(project) },
+      projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
       gh: {
         execute: () =>
@@ -175,7 +175,7 @@ it.effect("returns an actionable authentication error", () =>
 it.effect("rejects a pull request opened through the issue detail route", () =>
   Effect.gen(function* () {
     const service = make({
-      projects: { getProjectShellById: () => Effect.succeedSome(project) },
+      projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
       gh: {
         execute: () => Effect.succeed(output(JSON.stringify({ ...rawIssue, pull_request: {} }))),
@@ -189,7 +189,7 @@ it.effect("rejects a pull request opened through the issue detail route", () =>
 it.effect("reads label and assignee candidates and says when either list is cut short", () =>
   Effect.gen(function* () {
     const service = make({
-      projects: { getProjectShellById: () => Effect.succeedSome(project) },
+      projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
       gh: {
         execute: (input) =>
@@ -219,7 +219,7 @@ it.effect("changes labels and assignees with bodies on stdin", () =>
   Effect.gen(function* () {
     const calls: Array<{ args: string; stdin: string | undefined }> = [];
     const service = make({
-      projects: { getProjectShellById: () => Effect.succeedSome(project) },
+      projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
       gh: {
         execute: (input) => {
