@@ -7,7 +7,11 @@ import * as NodePath from "node:path";
 import { createPackage } from "@electron/asar";
 import { afterEach, beforeEach, expect, it } from "vite-plus/test";
 
-import { installDesktopArtifact, pruneDesktopInstalls } from "./install-personal-desktop.ts";
+import {
+  activateMacApp,
+  installDesktopArtifact,
+  pruneDesktopInstalls,
+} from "./install-personal-desktop.ts";
 
 let scratch: string;
 beforeEach(() => {
@@ -178,3 +182,33 @@ it("keeps the latest prior install when the launcher target cannot be read", () 
   for (const directory of [current, rollback, unrelated])
     expect(NodeFS.existsSync(directory)).toBe(true);
 });
+
+// oxlint-disable-next-line t3code/no-global-process-runtime -- The copy relies on macOS APFS clones.
+it.runIf(process.platform === "darwin")(
+  "replaces the Applications copy only while nothing runs from it",
+  () => {
+    const bundle = (name: string, contents: string) => {
+      const app = NodePath.join(scratch, name, "T3 Code.app");
+      NodeFS.mkdirSync(NodePath.join(app, "Contents"), { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(app, "Contents/build"), contents);
+      return app;
+    };
+    const applicationsDirectory = NodePath.join(scratch, "Applications");
+    const installed = NodePath.join(applicationsDirectory, "T3 Code.app/Contents/build");
+    const first = bundle("first", "first");
+    expect(activateMacApp({ bundle: first, applicationsDirectory, references: [] })).toBe(true);
+    expect(NodeFS.readFileSync(installed, "utf8")).toBe("first");
+
+    const second = bundle("second", "second");
+    const running = [`${applicationsDirectory}/T3 Code.app/Contents/MacOS/T3 Code --flag`];
+    expect(activateMacApp({ bundle: second, applicationsDirectory, references: running })).toBe(
+      false,
+    );
+    expect(NodeFS.readFileSync(installed, "utf8")).toBe("first");
+
+    expect(activateMacApp({ bundle: second, applicationsDirectory, references: [] })).toBe(true);
+    expect(NodeFS.readFileSync(installed, "utf8")).toBe("second");
+    expect(NodeFS.readFileSync(NodePath.join(first, "Contents/build"), "utf8")).toBe("first");
+    expect(NodeFS.readdirSync(applicationsDirectory)).toEqual(["T3 Code.app"]);
+  },
+);

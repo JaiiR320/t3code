@@ -32,10 +32,14 @@ import { releasePackageFiles } from "./update-release-package-versions.ts";
 // injects into the Node running it, which must support --build-sea (25.7+).
 const SEA_NODE_VERSION = "26.8.2";
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone script has no Effect runtime.
+const platform = process.platform;
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone script has no Effect runtime.
 const arch = process.arch;
+// Release archives exist for these hosts only; Intel Macs have no t3 executable.
 const RUST_TARGETS: Record<string, string> = {
-  x64: "x86_64-unknown-linux-gnu",
-  arm64: "aarch64-unknown-linux-gnu",
+  "linux-x64": "x86_64-unknown-linux-gnu",
+  "linux-arm64": "aarch64-unknown-linux-gnu",
+  "darwin-arm64": "aarch64-apple-darwin",
 };
 
 const repoRoot = NodePath.dirname(import.meta.dirname);
@@ -66,14 +70,16 @@ function capture(command: string, args: ReadonlyArray<string>) {
   return NodeChildProcess.execFileSync(command, args, { cwd: repoRoot, encoding: "utf8" }).trim();
 }
 
-// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone script has no Effect runtime.
-if (process.platform !== "linux") fail("Only the Linux systemd service is supported.");
-const rustTarget = RUST_TARGETS[arch] ?? fail(`Unsupported architecture ${arch}.`);
-const platformKey = `linux-${arch}`;
+const platformKey = `${platform}-${arch}`;
+const rustTarget = RUST_TARGETS[platformKey] ?? fail(`Unsupported platform ${platformKey}.`);
 
-// A restart stops the unit's whole cgroup before starting it again, and a
+// A restart stops the service's processes before starting it again, and a
 // process inside it would be killed between the two, leaving it stopped.
-const insideService = NodeFS.readFileSync("/proc/self/cgroup", "utf8").includes("/t3code.service");
+// systemd tracks them by cgroup; launchd exports the job label to them.
+const insideService =
+  platform === "darwin"
+    ? process.env.XPC_SERVICE_NAME === "com.t3tools.t3code.service"
+    : NodeFS.readFileSync("/proc/self/cgroup", "utf8").includes("/t3code.service");
 if (restart && insideService) {
   fail(
     "--restart would stop this process along with the service. Run it from a terminal outside T3, or drop --restart and restart later.",
@@ -86,20 +92,19 @@ const launcher = (() => {
   try {
     return capture("sh", ["-c", "command -v t3"]);
   } catch {
-    return fail("No t3 on PATH. Install T3 Code's CLI and background service first.");
+    return fail(
+      "No t3 on PATH, so there is no background service to update. Without one, the desktop app runs its bundled server and install-personal-desktop.ts covers server changes.",
+    );
   }
 })();
 if (!NodeFS.realpathSync(launcher).includes(`${NodePath.sep}runtime${NodePath.sep}versions`)) {
   fail(`${launcher} is not an installed t3 runtime launcher.`);
 }
 
-// CI gets this Node from vp's managed shims; a local shell usually has an
-// older one on PATH, so borrow the pinned version through mise instead.
+// The repository pins an older Node for development, so borrow the SEA
+// version through vp, which fetches it on first use.
 const [nodeMajor = 0, nodeMinor = 0] = process.versions.node.split(".").map(Number);
 const seaNodeReady = nodeMajor > 25 || (nodeMajor === 25 && nodeMinor >= 7);
-if (!seaNodeReady && NodeChildProcess.spawnSync("mise", ["--version"]).status !== 0) {
-  fail(`Building the t3 executable needs Node 25.7+ or mise to fetch Node ${SEA_NODE_VERSION}.`);
-}
 
 const serverPackage = JSON.parse(
   NodeFS.readFileSync(NodePath.join(repoRoot, "apps/server/package.json"), "utf8"),
@@ -165,12 +170,12 @@ try {
   if (seaNodeReady) {
     run(buildExe[0]!, buildExe.slice(1));
   } else {
-    run("mise", ["exec", `node@${SEA_NODE_VERSION}`, "--", ...buildExe]);
+    run("vp", ["env", "exec", "--node", SEA_NODE_VERSION, ...buildExe]);
   }
   run("node", [
     "scripts/build-cli-archive.ts",
     "--platform",
-    "linux",
+    platform === "darwin" ? "mac" : "linux",
     "--arch",
     arch,
     "--version",
