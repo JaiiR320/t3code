@@ -32,15 +32,15 @@ Commit the reviewed merge and any necessary adaptations with plain conventional 
 
 ## Install the tested source
 
-Run the repository installers sequentially, because they share build outputs and the service installer temporarily changes package versions:
+Run the repository installers sequentially, because they share build outputs and the service installer temporarily changes package versions. Skip the service installer on a machine without the background service, such as Jair's Mac, where the desktop app runs its bundled server and the desktop install covers server changes:
 
 ```bash
 node scripts/install-personal-service.ts
 node scripts/install-personal-desktop.ts
 ```
 
-- The service installer builds, smoke-tests, and selects a fresh personal runtime. Verify the `t3` launcher and the service unit's configured target. Clean up obsolete personal runtimes, keeping the newest, one previous working runtime, and every older runtime still running. Determine running paths from `/proc` and the service's actual PID; never kill processes by a name or path pattern.
-- The desktop installer ensures Electron, builds a fresh Linux x64 AppImage, verifies the extracted app and runtime, atomically switches `~/.local/bin/t3code`, and cleans up obsolete extracted builds and temporary artifacts. Verify its success and launcher target. Leave both desktop entries and `/opt/t3code-bin` alone.
+- The service installer builds, smoke-tests, and selects a fresh personal runtime. Verify the `t3` launcher and the service unit's configured target. Clean up obsolete personal runtimes, keeping the newest, one previous working runtime, and every older runtime still running. Determine running paths from the service's actual PID (`/proc` on Linux, `ps -p <pid> -o args=` on macOS); never kill processes by a name or path pattern.
+- The desktop installer ensures Electron, builds a fresh app, verifies the extracted app and runtime, selects it, and cleans up obsolete builds and temporary artifacts. On Linux x64 it builds an AppImage and atomically switches `~/.local/bin/t3code`; verify the launcher target and leave both desktop entries and `/opt/t3code-bin` alone. On macOS it builds a zip and copies the verified app into `~/Applications`. If T3 is running from there, the build stays staged under `~/.local/opt`; tell Jair to quit T3 and run `node scripts/install-personal-desktop.ts --activate`.
 - Never pass `--restart` to the service installer, restart the service, quit the app, or touch `~/.t3/userdata`. Jair performs any required restart outside the active T3 session.
 - If an install fails, fix what can be fixed within this update and retry the affected step. Otherwise report exactly which installation remains old; keep its working launcher and build. Do not ask for verification or push a partially installed update as though it succeeded.
 - If a later source fix changes runtime behavior, rebuild and install the affected surfaces before asking Jair to verify.
@@ -49,7 +49,7 @@ node scripts/install-personal-desktop.ts
 
 Report the merged upstream version or tip, source commit, any uncommitted changes included, checks run, installed desktop and service paths, and retained rollback builds. Distinguish the service's configured runtime from the version still running.
 
-Tell Jair to run `t3 service restart` when ready if the service still runs the old runtime, and to quit and reopen T3 to use the newly selected desktop build. Explain that restarting the service ends its active agent turns and terminals. Ask Jair to test the installed update, then end the turn and wait for the reply.
+Where the service is installed, tell Jair to run `t3 service restart` when ready if it still runs the old runtime, and to quit and reopen T3 to use the newly selected desktop build (on macOS, run `--activate` after quitting if the build was only staged). Explain that restarting the service ends its active agent turns and terminals. Ask Jair to test the installed update, then end the turn and wait for the reply.
 
 **Push to `origin/personal` only after Jair confirms the installed update works.** This is the verification gate Jair requested. Do not infer verification from elapsed time, passing automated tests, an unrelated message, or a report about the old running version. Link this skill when explaining why the push is pending.
 
