@@ -1,7 +1,7 @@
 import type { EnvironmentCatalogState } from "@t3tools/client-runtime/state/connections";
 import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
 import { mergeWithDefaultKeybindings } from "@t3tools/shared/keybindings";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 export function createClientKeybindingsAtom(input: {
   readonly catalogValueAtom: Atom.Atom<EnvironmentCatalogState>;

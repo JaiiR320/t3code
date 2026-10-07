@@ -11,7 +11,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { ProjectService } from "../project/ProjectService.ts";
 import type { VcsProcess } from "../vcs/VcsProcess.ts";
-import type { GitHubCli } from "./GitHubCli.ts";
+import type { GitHubApi } from "./GitHubApi.ts";
 
 const RawActor = Schema.Struct({ login: Schema.String, avatar_url: Schema.String });
 const Actor = Schema.NullOr(RawActor);
@@ -64,7 +64,6 @@ const ChangeBody = Schema.Union([
   Schema.Struct({ labels: Schema.Array(Schema.String) }),
   Schema.Struct({ assignees: Schema.Array(Schema.String) }),
 ]);
-const encodeChange = Schema.encodeSync(Schema.fromJsonString(ChangeBody));
 const isIssueReadError = Schema.is(IssueReadError);
 
 const actor = (raw: typeof RawActor.Type | null) =>
@@ -85,11 +84,11 @@ const summary = (issue: typeof RawIssue.Type) => ({
 export function make({
   projects,
   vcs,
-  gh,
+  github,
 }: {
   projects: Pick<ProjectService["Service"], "getShell">;
   vcs: Pick<VcsProcess["Service"], "run">;
-  gh: Pick<GitHubCli["Service"], "execute">;
+  github: Pick<GitHubApi["Service"], "rest">;
 }) {
   const resolve = Effect.fn("GitHubIssues.resolve")(function* (input: IssueScope) {
     const project = yield* projects.getShell(input.projectId);
@@ -118,47 +117,37 @@ export function make({
         message: "This prototype supports repositories on github.com.",
       });
     }
-    return { cwd, repository: key.slice("github.com/".length) };
+    return { repository: key.slice("github.com/".length) };
   });
 
-  const api = Effect.fn("GitHubIssues.api")(function* (cwd: string, endpoint: string) {
-    const output = yield* gh.execute({
-      cwd,
-      args: ["api", "--hostname", "github.com", endpoint],
-      rateLimitHost: "github.com",
-      maxOutputBytes: 4_000_000,
+  const api = Effect.fn("GitHubIssues.api")(function* (endpoint: string) {
+    const response = yield* github.rest({
+      host: "github.com",
+      operation: "GitHubIssues.read",
+      path: endpoint,
+      maxResponseBytes: 4_000_000,
     });
-    return output.stdout;
+    return response.body;
   });
-  /** Bodies go over stdin, never argv, where process listings and failure messages echo them. */
   const write = Effect.fn("GitHubIssues.write")(function* (
-    cwd: string,
     method: "POST" | "DELETE",
     endpoint: string,
     body?: typeof ChangeBody.Type,
   ) {
-    yield* gh.execute({
-      cwd,
-      args: [
-        "api",
-        "--method",
-        method,
-        "--hostname",
-        "github.com",
-        endpoint,
-        ...(body ? ["--input", "-"] : []),
-      ],
-      ...(body ? { stdin: encodeChange(body) } : {}),
-      rateLimitHost: "github.com",
+    yield* github.rest({
+      host: "github.com",
+      operation: "GitHubIssues.write",
+      method,
+      path: endpoint,
+      ...(body ? { body } : {}),
     });
   });
   const readError = (error: { readonly message: string }) =>
     isIssueReadError(error) ? error : new IssueReadError({ message: error.message });
 
   const list = Effect.fn("GitHubIssues.list")(function* (input: IssueListInput) {
-    const { cwd, repository } = yield* resolve(input);
+    const { repository } = yield* resolve(input);
     const raw = yield* api(
-      cwd,
       `search/issues?q=${encodeURIComponent(`repo:${repository} is:issue is:${input.state}`)}&sort=created&order=desc&per_page=${PAGE_SIZE}&page=${input.page}`,
     );
     const result = yield* decodeSearch(raw);
@@ -177,19 +166,16 @@ export function make({
   }, Effect.mapError(readError));
 
   const detail = Effect.fn("GitHubIssues.detail")(function* (input: IssueDetailInput) {
-    const { cwd, repository } = yield* resolve(input);
+    const { repository } = yield* resolve(input);
     const endpoint = `repos/${repository}/issues/${input.number}`;
-    const raw = yield* api(cwd, endpoint);
+    const raw = yield* api(endpoint);
     const issue = yield* decodeIssue(raw);
     if (issue.pull_request !== undefined) {
       return yield* new IssueReadError({
         message: "This number belongs to a pull request, not an issue.",
       });
     }
-    const commentsRaw = yield* api(
-      cwd,
-      `${endpoint}/comments?per_page=${PAGE_SIZE}&page=${input.page}`,
-    );
+    const commentsRaw = yield* api(`${endpoint}/comments?per_page=${PAGE_SIZE}&page=${input.page}`);
     const comments = yield* decodeComments(commentsRaw);
     return {
       repository,
@@ -211,13 +197,13 @@ export function make({
   const metadataCandidates = Effect.fn("GitHubIssues.metadataCandidates")(function* (
     input: IssueScope,
   ) {
-    const { cwd, repository } = yield* resolve(input);
+    const { repository } = yield* resolve(input);
     const [labels, assignees] = yield* Effect.all(
       [
-        api(cwd, `repos/${repository}/labels?per_page=${CANDIDATE_PAGE_SIZE}`).pipe(
+        api(`repos/${repository}/labels?per_page=${CANDIDATE_PAGE_SIZE}`).pipe(
           Effect.flatMap(decodeLabels),
         ),
-        api(cwd, `repos/${repository}/assignees?per_page=${CANDIDATE_PAGE_SIZE}`).pipe(
+        api(`repos/${repository}/assignees?per_page=${CANDIDATE_PAGE_SIZE}`).pipe(
           Effect.flatMap(decodeAssignees),
         ),
       ],
@@ -234,18 +220,18 @@ export function make({
   const setMetadata = Effect.fn("GitHubIssues.setMetadata")(function* (
     input: IssueMetadataChangeInput,
   ) {
-    const { cwd, repository } = yield* resolve(input);
+    const { repository } = yield* resolve(input);
     const endpoint = `repos/${repository}/issues/${input.number}/${input.field}`;
     if (input.field === "assignees") {
-      return yield* write(cwd, input.applied ? "POST" : "DELETE", endpoint, {
+      return yield* write(input.applied ? "POST" : "DELETE", endpoint, {
         assignees: input.names,
       });
     }
-    if (input.applied) return yield* write(cwd, "POST", endpoint, { labels: input.names });
+    if (input.applied) return yield* write("POST", endpoint, { labels: input.names });
     // The label endpoint takes one name in its path, which may carry a space or a slash.
     yield* Effect.forEach(
       input.names,
-      (name) => write(cwd, "DELETE", `${endpoint}/${encodeURIComponent(name)}`),
+      (name) => write("DELETE", `${endpoint}/${encodeURIComponent(name)}`),
       { discard: true },
     );
   }, Effect.mapError(readError));

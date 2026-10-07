@@ -2,9 +2,9 @@ import { assert, it } from "@effect/vitest";
 import { type ProjectId, type OrchestrationProjectShell } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import { make } from "./GitHubIssues.ts";
-import { GitHubCliAuthenticationError } from "./GitHubCli.ts";
+import { GitHubApiAuthenticationError } from "./GitHubApi.ts";
 
 const project: OrchestrationProjectShell = {
   id: "project-1" as ProjectId,
@@ -22,6 +22,13 @@ const output = (stdout: string) => ({
   stderr: "",
   stdoutTruncated: false,
   stderrTruncated: false,
+});
+const response = (body: string) => ({
+  status: 200,
+  headers: {},
+  body,
+  truncated: false,
+  invalidUtf8: false,
 });
 const rawIssue = {
   number: 42,
@@ -49,11 +56,11 @@ it.effect("reads the selected remote on the owning server and excludes pull requ
           return Effect.succeed(output("git@github.com:Team/Repo.git\n"));
         },
       },
-      gh: {
-        execute: (input) => {
-          reads.push(input.args.join(" "));
+      github: {
+        rest: (input) => {
+          reads.push(input.path);
           return Effect.succeed(
-            output(
+            response(
               JSON.stringify({
                 total_count: 52,
                 incomplete_results: false,
@@ -73,7 +80,7 @@ it.effect("reads the selected remote on the owning server and excludes pull requ
     assert.strictEqual(result.nextPage, null);
     assert.match(
       reads[0]!,
-      /api --hostname github.com search\/issues\?q=repo%3Ateam%2Frepo%20is%3Aissue%20is%3Aopen.*page=2$/,
+      /^search\/issues\?q=repo%3Ateam%2Frepo%20is%3Aissue%20is%3Aopen.*page=2$/,
     );
   }),
 );
@@ -83,10 +90,10 @@ it.effect("paginates search results and stops at GitHub's 1,000-result limit", (
     const service = make({
       projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo.git")) },
-      gh: {
-        execute: () =>
+      github: {
+        rest: () =>
           Effect.succeed(
-            output(
+            response(
               JSON.stringify({ total_count: 1100, incomplete_results: false, items: [rawIssue] }),
             ),
           ),
@@ -105,12 +112,12 @@ it.effect("loads issue Markdown, metadata and paginated comments, including dele
     const service = make({
       projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
-      gh: {
-        execute: (input) =>
+      github: {
+        rest: (input) =>
           Effect.succeed(
-            output(
+            response(
               JSON.stringify(
-                input.args.at(-1)?.includes("/comments?")
+                input.path.includes("/comments?")
                   ? [{ id: 9, user: null, body: "A reply", created_at: rawIssue.created_at }]
                   : rawIssue,
               ),
@@ -142,7 +149,7 @@ it.effect("does not call GitHub for a missing project or unsupported remote", ()
           getShell: () => Effect.succeed(exists ? Option.some(project) : Option.none()),
         },
         vcs: { run: () => Effect.succeed(output("https://gitlab.com/team/repo")) },
-        gh: { execute: () => Effect.die("GitHub must not be called") },
+        github: { rest: () => Effect.die("GitHub must not be called") },
       });
       const error = yield* service.list({ ...scope, state: "open", page: 1 }).pipe(Effect.flip);
       assert.strictEqual(error._tag, "IssueReadError");
@@ -156,13 +163,12 @@ it.effect("returns an actionable authentication error", () =>
     const service = make({
       projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
-      gh: {
-        execute: () =>
+      github: {
+        rest: () =>
           Effect.fail(
-            new GitHubCliAuthenticationError({
-              command: "gh",
-              cwd: "/repo",
-              cause: "not logged in",
+            new GitHubApiAuthenticationError({
+              host: "github.com",
+              operation: "GitHubIssues.read",
             }),
           ),
       },
@@ -177,8 +183,8 @@ it.effect("rejects a pull request opened through the issue detail route", () =>
     const service = make({
       projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
-      gh: {
-        execute: () => Effect.succeed(output(JSON.stringify({ ...rawIssue, pull_request: {} }))),
+      github: {
+        rest: () => Effect.succeed(response(JSON.stringify({ ...rawIssue, pull_request: {} }))),
       },
     });
     const error = yield* service.detail({ ...scope, number: 42, page: 1 }).pipe(Effect.flip);
@@ -191,12 +197,12 @@ it.effect("reads label and assignee candidates and says when either list is cut 
     const service = make({
       projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
-      gh: {
-        execute: (input) =>
+      github: {
+        rest: (input) =>
           Effect.succeed(
-            output(
+            response(
               JSON.stringify(
-                input.args.at(-1)?.startsWith("repos/team/repo/labels?")
+                input.path.startsWith("repos/team/repo/labels?")
                   ? [{ name: "bug", color: "ff0000", description: null }]
                   : Array.from({ length: 100 }, (_, index) => ({
                       login: `user${index}`,
@@ -215,16 +221,16 @@ it.effect("reads label and assignee candidates and says when either list is cut 
   }),
 );
 
-it.effect("changes labels and assignees with bodies on stdin", () =>
+it.effect("changes labels and assignees with JSON bodies", () =>
   Effect.gen(function* () {
-    const calls: Array<{ args: string; stdin: string | undefined }> = [];
+    const calls: Array<{ method: string | undefined; path: string; body: unknown }> = [];
     const service = make({
       projects: { getShell: () => Effect.succeedSome(project) },
       vcs: { run: () => Effect.succeed(output("https://github.com/team/repo")) },
-      gh: {
-        execute: (input) => {
-          calls.push({ args: input.args.join(" "), stdin: input.stdin });
-          return Effect.succeed(output("{}"));
+      github: {
+        rest: (input) => {
+          calls.push({ method: input.method, path: input.path, body: input.body });
+          return Effect.succeed(response("{}"));
         },
       },
     });
@@ -237,18 +243,12 @@ it.effect("changes labels and assignees with bodies on stdin", () =>
       applied: false,
     });
     yield* service.setMetadata({ ...change, field: "assignees", names: ["jair"], applied: false });
-    const issue = "--hostname github.com repos/team/repo/issues/42";
+    const issue = "repos/team/repo/issues/42";
     assert.deepStrictEqual(calls, [
-      {
-        args: `api --method POST ${issue}/labels --input -`,
-        stdin: '{"labels":["bug"]}',
-      },
-      { args: `api --method DELETE ${issue}/labels/needs%20triage`, stdin: undefined },
-      { args: `api --method DELETE ${issue}/labels/a%2Fb`, stdin: undefined },
-      {
-        args: `api --method DELETE ${issue}/assignees --input -`,
-        stdin: '{"assignees":["jair"]}',
-      },
+      { method: "POST", path: `${issue}/labels`, body: { labels: ["bug"] } },
+      { method: "DELETE", path: `${issue}/labels/needs%20triage`, body: undefined },
+      { method: "DELETE", path: `${issue}/labels/a%2Fb`, body: undefined },
+      { method: "DELETE", path: `${issue}/assignees`, body: { assignees: ["jair"] } },
     ]);
   }),
 );
