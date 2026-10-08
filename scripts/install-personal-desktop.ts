@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off - Standalone Node installer, like install-personal-service.ts.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalTimers:off - Standalone Node installer, like install-personal-service.ts.
 /** Builds and installs Jair's Linux or macOS desktop without opening or restarting it. */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -7,6 +7,8 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import { extractFile } from "@electron/asar";
+
+import { loadRepoEnv } from "./lib/public-config.ts";
 
 const repoRoot = NodePath.dirname(import.meta.dirname);
 const receiptName = "personal-install.json";
@@ -297,10 +299,12 @@ export function pruneDesktopInstalls(input: {
 const usage = `Usage: node scripts/install-personal-desktop.ts [--activate]
 Builds a fresh desktop app, verifies it, and selects it without restarting the app or service.
   Linux x64: installs an AppImage build under ~/.local/opt and switches ~/.local/bin/t3code.
-  macOS: installs the app under ~/.local/opt and copies it into ~/Applications once it is not running.
+  macOS: installs the app under ~/.local/opt and copies it into ~/Applications, waiting for T3 to quit if it is running.
   --activate (macOS): copy the newest installed build into ~/Applications without building.`;
 
-function activateNewestMacBuild(installRoot: string, applicationsDirectory: string) {
+const activationWaiterName = "activate-after-quit.pid";
+
+function newestMacBundle(installRoot: string) {
   const newest = NodeFS.existsSync(installRoot)
     ? NodeFS.readdirSync(installRoot)
         .filter((name) => name.startsWith("t3code-"))
@@ -310,17 +314,56 @@ function activateNewestMacBuild(installRoot: string, applicationsDirectory: stri
     : undefined;
   const bundle = newest && macBundle(newest);
   if (!bundle) throw new Error(`No installed macOS build found under ${installRoot}.`);
-  return activateLoggingResult(bundle, applicationsDirectory);
+  return bundle;
 }
 
-function activateLoggingResult(bundle: string, applicationsDirectory: string) {
-  const activated = activateMacApp({ bundle, applicationsDirectory, references: psReferences() });
-  log(
-    activated
-      ? `Selected ${bundle} as ${NodePath.join(applicationsDirectory, NodePath.basename(bundle))}.`
-      : `${NodePath.basename(bundle)} is running, so ${applicationsDirectory} still has the previous build. Quit T3 and run \`node scripts/install-personal-desktop.ts --activate\`.`,
+/**
+ * Selects the newest build now, or leaves a detached waiter that selects it as
+ * soon as T3 quits, so quitting and reopening T3 opens the new build.
+ */
+function activateNewestMacBuild(installRoot: string, applicationsDirectory: string) {
+  const bundle = newestMacBundle(installRoot);
+  if (activateMacApp({ bundle, applicationsDirectory, references: psReferences() })) {
+    log(
+      `Selected ${bundle} as ${NodePath.join(applicationsDirectory, NodePath.basename(bundle))}.`,
+    );
+    return true;
+  }
+  const logFile = NodePath.join(installRoot, "activate-after-quit.log");
+  const output = NodeFS.openSync(logFile, "a");
+  // Detached into its own session so it outlives this installer and a service restart.
+  const waiter = NodeChildProcess.spawn(
+    process.execPath,
+    [import.meta.filename, "--activate-after-quit"],
+    { cwd: repoRoot, detached: true, stdio: ["ignore", output, output] },
   );
-  return activated;
+  NodeFS.closeSync(output);
+  // The newest waiter owns activation; older ones see the change and exit.
+  NodeFS.writeFileSync(NodePath.join(installRoot, activationWaiterName), String(waiter.pid));
+  waiter.unref();
+  log(
+    `T3 is running, so ${applicationsDirectory} keeps the previous build until it quits. Quit and reopen T3 to use the new build (log: ${logFile}).`,
+  );
+  return false;
+}
+
+/** Polls until T3 quits, then copies the newest build into Applications. */
+function activateAfterQuit(installRoot: string, applicationsDirectory: string, deadline: number) {
+  const owner = NodeFS.readFileSync(NodePath.join(installRoot, activationWaiterName), "utf8");
+  if (owner !== String(process.pid)) return;
+  const bundle = newestMacBundle(installRoot);
+  if (activateMacApp({ bundle, applicationsDirectory, references: psReferences() })) {
+    NodeFS.rmSync(NodePath.join(installRoot, activationWaiterName), { force: true });
+    log(`${new Date().toISOString()} Selected ${bundle}.`);
+    return;
+  }
+  if (Date.now() > deadline) {
+    log(
+      `${new Date().toISOString()} T3 did not quit within a week; run --activate after quitting.`,
+    );
+    return;
+  }
+  setTimeout(() => activateAfterQuit(installRoot, applicationsDirectory, deadline), 1000);
 }
 
 function main() {
@@ -344,7 +387,16 @@ function main() {
     activateNewestMacBuild(installRoot, applicationsDirectory);
     return;
   }
+  if (mac && args.length === 1 && args[0] === "--activate-after-quit") {
+    activateAfterQuit(installRoot, applicationsDirectory, Date.now() + 7 * 24 * 60 * 60 * 1000);
+    return;
+  }
   if (args.length) throw new Error(`Unsupported arguments.\n${usage}`);
+  // Source builds only include T3 Connect when its public settings are configured.
+  const repoEnv = loadRepoEnv();
+  if (!repoEnv.T3CODE_RELAY_URL || !repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY) {
+    throw new Error("T3 Connect settings are missing. Run `cp .env.example .env` and retry.");
+  }
   const captureGit = (args: ReadonlyArray<string>) =>
     NodeChildProcess.execFileSync("git", args, { cwd: repoRoot, encoding: "utf8" }).trim();
   const sourceCommit = captureGit(["rev-parse", "HEAD"]);
@@ -410,9 +462,9 @@ function main() {
     let previous: string | undefined;
     let selected = true;
     if (mac) {
-      const bundle = installMacArtifact(install);
+      installMacArtifact(install);
       log(`Installed ${desktopPackage.version} at ${installDirectory}.`);
-      selected = activateLoggingResult(bundle, applicationsDirectory);
+      selected = activateNewestMacBuild(installRoot, applicationsDirectory);
     } else {
       previous = installDesktopArtifact({
         ...install,

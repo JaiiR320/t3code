@@ -26,6 +26,7 @@ import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import { loadRepoEnv } from "./lib/public-config.ts";
 import { releasePackageFiles } from "./update-release-package-versions.ts";
 
 // Keep in step with SEA_NODE_VERSION in apps/server/vite.config.ts. `build-exe`
@@ -68,6 +69,12 @@ function run(command: string, args: ReadonlyArray<string>, env: NodeJS.ProcessEn
 
 function capture(command: string, args: ReadonlyArray<string>) {
   return NodeChildProcess.execFileSync(command, args, { cwd: repoRoot, encoding: "utf8" }).trim();
+}
+
+// Source builds only include T3 Connect when its public settings are configured.
+const repoEnv = loadRepoEnv();
+if (!repoEnv.T3CODE_RELAY_URL || !repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY) {
+  fail("T3 Connect settings are missing. Run `cp .env.example .env` and retry.");
 }
 
 const platformKey = `${platform}-${arch}`;
