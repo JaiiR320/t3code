@@ -15,6 +15,8 @@ This file covers the generic flow: merge, check, install, verify, push. Device-s
 
 Identify the machine with `uname -s` (`Darwin` is the MacBook, `Linux` is Omarchy). Only build the Android app when Jair asks for it or the update changes mobile or shared client code he wants on his phone.
 
+Every device uses T3 Connect. Source builds include it only when the checkout's gitignored `.env` holds the public Connect settings, so create it with `cp .env.example .env` if it is missing. Both installers refuse to build without it; the Android build has no such guard and silently ships without Connect sign-in.
+
 ## Prepare and merge
 
 - Inspect the working tree, branches, worktrees, and remotes. Preserve unrelated uncommitted work; use an isolated worktree if needed rather than discarding it or including it in the update.
@@ -56,7 +58,7 @@ Follow the device file for each target. These rules apply on every device:
 
 Report the merged upstream version or tip, source commit, any uncommitted changes included, checks run, installed paths per device, and retained rollback builds. Distinguish the service's configured runtime from the version still running.
 
-Tell Jair what each device still needs: a service restart (`t3 service restart`, which ends the service's active agent turns and terminals), quitting and reopening the desktop app (plus `--activate` on the MacBook if the build was only staged), or tapping install on the phone. Ask Jair to test the installed update, then end the turn and wait for the reply.
+Tell Jair what each device still needs: a service restart (`t3 service restart`, which ends the service's active agent turns and terminals), quitting and reopening the desktop app, or tapping install on the phone. Ask Jair to test the installed update, then end the turn and wait for the reply.
 
 **Push to `origin/personal` only after Jair confirms the installed update works.** This is the verification gate Jair requested. Do not infer verification from elapsed time, passing automated tests, an unrelated message, or a report about the old running version. Link this skill when explaining why the push is pending.
 

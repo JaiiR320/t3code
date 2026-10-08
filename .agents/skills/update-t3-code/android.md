@@ -12,6 +12,10 @@ Android installs an APK over the existing app, keeping its data, only when all t
 
 Never tell Jair to uninstall first; uninstalling erases the app's pairings and settings. If Android reports a package conflict, stop and investigate the signature rather than uninstalling.
 
+## T3 Connect
+
+The phone has no other route to the Mac, so the APK must include the Connect sign-in. `app.config.ts` reads it from the checkout's root `.env` (see [SKILL.md](SKILL.md)); confirm `T3CODE_RELAY_URL` and `T3CODE_CLERK_PUBLISHABLE_KEY` are set there before prebuild. An APK built without them installs and opens, but cannot sign in to Connect. On the phone, Jair signs in to the same Connect account and picks the Mac or PC from the list; no pairing QR code is needed.
+
 ## Toolchain
 
 The build needs JDK 17 and the Android SDK. On the MacBook they came from Homebrew (`openjdk@17` and the `android-commandlinetools` cask) with the SDK at `~/Library/Android/sdk`; on Omarchy use the distro's JDK 17 and an SDK at `~/Android/Sdk`. Accept licenses once with `sdkmanager --sdk_root=<sdk> --licenses` and install `platform-tools`; Gradle downloads the platform, build tools, NDK, and CMake it needs on first build.
