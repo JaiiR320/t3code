@@ -713,6 +713,8 @@ const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   '[contenteditable="true"]',
   '[contenteditable="plaintext-only"]',
   '[role="textbox"]',
+  // Surfaces that forward raw keys themselves, such as the device panel's simulator screen.
+  '[role="application"]',
 ].join(",");
 const TYPE_TO_FOCUS_INTERACTIVE_SELECTOR = [
   "button",
