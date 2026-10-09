@@ -74,7 +74,8 @@ export function PullRequestCommentIdentity({
 /**
  * A conversation card: a tinted strip for who said it and what can be done about it, then the
  * words. Offscreen cards skip style, layout and paint; long threads carry pages of highlighted
- * code, and the conversation sits below the description either way.
+ * code, and the conversation sits below the description either way. Remember measured heights
+ * so skipping a card above the viewport does not shrink the scroll range at the bottom.
  */
 export function PullRequestCommentCard({
   header,
@@ -84,7 +85,7 @@ export function PullRequestCommentCard({
   children: ReactNode;
 }) {
   return (
-    <article className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:160px] [content-visibility:auto]">
+    <article className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:auto_160px] [content-visibility:auto]">
       <div className="flex flex-wrap items-start gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5">
         {header}
       </div>

@@ -198,7 +198,7 @@ function CollapsedComment({
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <article className="group rounded-lg border border-border/60 [contain-intrinsic-block-size:44px] [content-visibility:auto]">
+      <article className="group rounded-lg border border-border/60 [contain-intrinsic-block-size:auto_44px] [content-visibility:auto]">
         <div className="p-3">
           <div className="flex flex-wrap items-start gap-2">
             <CommentIdentity comment={comment} detail={detail} />
