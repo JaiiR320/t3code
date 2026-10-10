@@ -1838,6 +1838,10 @@ describe("shouldRefocusComposerOnWindowFocus", () => {
     expect(shouldRefocusComposerOnWindowFocus(element("DIV", { role: "textbox" }))).toBe(false);
   });
 
+  it("leaves a focused device simulator screen alone", () => {
+    expect(shouldRefocusComposerOnWindowFocus(element("DIV", { role: "application" }))).toBe(false);
+  });
+
   it.each(["IFRAME", "WEBVIEW"])("leaves a focused %s preview alone", (tagName) => {
     expect(shouldRefocusComposerOnWindowFocus(element(tagName))).toBe(false);
   });
