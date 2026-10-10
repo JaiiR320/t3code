@@ -12,12 +12,15 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   HammerIcon,
+  ListFilterIcon,
   TagIcon,
   UsersIcon,
 } from "lucide-react";
+import * as Schema from "effect/Schema";
 import { useRef, useState, type ReactNode } from "react";
 
 import { pullRequestEnvironment } from "~/state/pullRequests";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { cn } from "~/lib/utils";
 import { useOpenLink } from "~/browser/useOpenLink";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
@@ -25,6 +28,14 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { Button } from "../ui/button";
 import { PullRequestEditButton } from "./PullRequestEditButton";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuPopup,
+  MenuTrigger,
+} from "../ui/menu";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -57,12 +68,7 @@ import { PullRequestCommentBody } from "./PullRequestCommentBody";
 import { PullRequestMarkdownEditor } from "./PullRequestMarkdownEditor";
 import { PullRequestReactionBar } from "./PullRequestReactions";
 import { PullRequestConversationGhost } from "./PullRequestGhosts";
-import {
-  PullRequestCommentCard,
-  PullRequestCommentIdentity,
-  PullRequestMetaRow,
-  PullRequestSummarySection,
-} from "./PullRequestSummaryParts";
+import { sectionCollapseAnchorScrollTop } from "./pullRequestSummaryScroll.logic";
 
 /** One reviewer, however a host happens to have cased their login this time. */
 function reviewerKey(login: string): string {
@@ -82,12 +88,31 @@ function CommentIdentity({
       ? new URL(`/${encodeURIComponent(actor.login)}`, detail.url).toString()
       : null;
   return (
-    <PullRequestCommentIdentity
-      actor={actor}
-      profileUrl={profileUrl}
-      createdAt={comment.createdAt}
-      url={comment.url}
-    />
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <PullRequestActorLabel actor={actor} profileUrl={profileUrl} className="max-w-full" />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            comment.url ? (
+              <a
+                href={comment.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted-foreground hover:text-foreground hover:underline"
+              />
+            ) : (
+              <span className="text-muted-foreground" />
+            )
+          }
+        >
+          <time dateTime={comment.createdAt}>{formatRelativeTimeLabel(comment.createdAt)}</time>
+        </TooltipTrigger>
+        <TooltipPopup>
+          {new Date(comment.createdAt).toLocaleString()}
+          {comment.url ? " · Open comment on host" : ""}
+        </TooltipPopup>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -198,7 +223,7 @@ function CollapsedComment({
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <article className="group rounded-lg border border-border/60 [contain-intrinsic-block-size:auto_44px] [content-visibility:auto]">
+      <article className="group rounded-lg border border-border/60 [contain-intrinsic-block-size:44px] [content-visibility:auto]">
         <div className="p-3">
           <div className="flex flex-wrap items-start gap-2">
             <CommentIdentity comment={comment} detail={detail} />
@@ -247,102 +272,91 @@ function CollapsedComment({
   );
 }
 
-function CommentGroup({
+function MetaRow({
+  icon,
   label,
-  comments,
-  detail,
   children,
-  onOpenChange,
 }: {
+  icon: ReactNode;
   label: string;
-  comments: readonly PullRequestComment[];
-  detail: PullRequestDetailView;
   children: ReactNode;
-  onOpenChange?: (open: boolean) => void;
 }) {
-  const authors = [
-    ...new Map(
-      comments.map((comment) => [reviewerKey(comment.author?.login ?? "ghost"), comment.author]),
-    ).values(),
-  ];
-  const fileCount = new Set(comments.flatMap((comment) => (comment.path ? [comment.path] : [])))
-    .size;
-  const latest = comments.reduce<string | null>(
-    (date, comment) => (date === null || comment.createdAt > date ? comment.createdAt : date),
-    null,
-  );
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-background">
-      <Collapsible onOpenChange={onOpenChange}>
-        <div className="flex items-center gap-3 pl-3">
-          <div className="flex shrink-0 -space-x-1.5">
-            {authors.slice(0, 3).map((actor) => (
-              // The ring separates the overlapping faces; it belongs to the stack, not the actor.
-              <span
-                key={actor?.login ?? "ghost"}
-                className="relative flex rounded-full ring-2 ring-background hover:z-10 focus-within:z-10"
-              >
-                <PullRequestActorLabel
-                  actor={actor}
-                  profileUrl={
-                    detail.provider === "github" && actor
-                      ? new URL(
-                          actor.isBot || actor.login.endsWith("[bot]")
-                            ? `/apps/${encodeURIComponent(actor.login.replace(/\[bot\]$/, ""))}`
-                            : `/${encodeURIComponent(actor.login)}`,
-                          detail.url,
-                        ).toString()
-                      : null
-                  }
-                  variant="avatar"
-                />
-              </span>
-            ))}
-            {authors.length > 3 ? (
-              <span className="relative flex size-6 items-center justify-center rounded-full bg-muted text-3xs text-muted-foreground ring-2 ring-background">
-                +{authors.length - 3}
-              </span>
-            ) : null}
-          </div>
-          <CollapsibleTrigger
-            aria-label={label}
-            className="group flex min-w-0 flex-1 items-center gap-3 rounded-md py-3 pr-3 text-left hover:bg-muted/30"
-          >
-            <span className="min-w-0 flex-1 space-y-1">
-              <span className="block text-xs font-medium text-foreground/90">{label}</span>
-              <span className="flex flex-wrap gap-x-1.5 text-2xs text-muted-foreground">
-                <span>
-                  {authors.length} {authors.length === 1 ? "author" : "authors"}
-                </span>
-                {fileCount > 0 ? (
-                  <span>
-                    · {fileCount} {fileCount === 1 ? "file" : "files"}
-                  </span>
-                ) : null}
-                {latest ? (
-                  <span>
-                    · Latest{" "}
-                    <Tooltip>
-                      <TooltipTrigger render={<time dateTime={latest} />}>
-                        {formatRelativeTimeLabel(latest)}
-                      </TooltipTrigger>
-                      <TooltipPopup>{new Date(latest).toLocaleString()}</TooltipPopup>
-                    </Tooltip>
-                  </span>
-                ) : null}
-              </span>
-            </span>
-            <ChevronRightIcon
-              aria-hidden
-              className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-90"
-            />
-          </CollapsibleTrigger>
-        </div>
-        <CollapsiblePanel keepMounted>
-          <div className="border-t border-border/60 px-3 pb-3">{children}</div>
-        </CollapsiblePanel>
-      </Collapsible>
+    <div className="grid min-h-7 min-w-0 grid-cols-[6rem_minmax(0,1fr)] items-center gap-2 text-xs sm:min-h-6">
+      <span className="flex items-center gap-1.5 text-muted-foreground">
+        {icon}
+        {label}
+      </span>
+      <span className="min-w-0 text-foreground">{children}</span>
     </div>
+  );
+}
+
+function Section({
+  title,
+  defaultOpen = true,
+  keepMounted = false,
+  actions,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  keepMounted?: boolean;
+  /** Heading controls stay separate from the collapse trigger so they remain independently usable. */
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const headingRef = useRef<HTMLDivElement>(null);
+  const setOpenWithScrollAnchor = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      const heading = headingRef.current;
+      const section = heading?.closest<HTMLElement>("[data-pull-request-summary-section]");
+      const scroller = heading?.closest<HTMLElement>("[data-pull-request-summary-scroll]");
+      if (heading && section && scroller) {
+        const target = sectionCollapseAnchorScrollTop({
+          scrollTop: scroller.scrollTop,
+          viewportTop: scroller.getBoundingClientRect().top,
+          sectionTop: section.getBoundingClientRect().top,
+          headingTop: heading.getBoundingClientRect().top,
+        });
+        // Synchronous with the press: React commits the collapsed height before the browser
+        // paints, so the reader sees the heading they pressed stay put rather than a jump first.
+        if (target !== null) scroller.scrollTop = target;
+      }
+    }
+    setOpen(nextOpen);
+  };
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpenWithScrollAnchor}
+      render={<section aria-label={title} />}
+      data-pull-request-summary-section
+    >
+      {/* The heading rides the top of the scroll box the way a diff's file header does, so a
+          section can be collapsed from wherever its body has been read to rather than only from
+          where it started. Opaque, because the rows it covers scroll beneath it. */}
+      <div
+        ref={headingRef}
+        className="sticky top-0 z-10 flex w-full items-center bg-background pr-4"
+      >
+        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1.5 px-4 py-3 text-left text-xs font-medium text-muted-foreground hover:text-foreground">
+          <span>{title}</span>
+          <ChevronRightIcon
+            aria-hidden
+            className={cn(
+              "size-3.5 text-muted-foreground/60 transition-transform",
+              open && "rotate-90",
+            )}
+          />
+        </CollapsibleTrigger>
+        {actions}
+      </div>
+      <CollapsiblePanel keepMounted={keepMounted}>
+        <div className="px-4 pb-4">{children}</div>
+      </CollapsiblePanel>
+    </Collapsible>
   );
 }
 
@@ -351,6 +365,15 @@ function CommentGroup({
  * two hundred markdown documents, and the ones worth arriving for are the recent ones.
  */
 const COMMENT_PAGE = 10;
+
+/**
+ * Which kinds of comment the conversation shows. Kept per browser rather than per pull request:
+ * whether a reader wants bot reports and finished threads in front of them is a habit, not a
+ * property of one change.
+ */
+const COMMENT_FILTER_STORAGE_KEY = "t3code:pull-request-comment-filter:v1";
+const CommentFilterSchema = Schema.Struct({ bots: Schema.Boolean, resolved: Schema.Boolean });
+const DEFAULT_COMMENT_FILTER: typeof CommentFilterSchema.Type = { bots: false, resolved: false };
 
 export function PullRequestSummaryTab({
   environmentId,
@@ -385,10 +408,12 @@ export function PullRequestSummaryTab({
   // Keyed by the pull request, so opening another one starts at the end of its conversation
   // rather than wherever the last one had been read back to.
   const [shown, setShown] = useState({ url: detail.url, count: COMMENT_PAGE });
-  const [openedBotGroup, setOpenedBotGroup] = useState<string | null>(null);
-  const [shownBots, setShownBots] = useState({ url: detail.url, count: COMMENT_PAGE });
-  const shownBotComments = shownBots.url === detail.url ? shownBots.count : COMMENT_PAGE;
   const shownComments = shown.url === detail.url ? shown.count : COMMENT_PAGE;
+  const [commentFilter, setCommentFilter] = useLocalStorage(
+    COMMENT_FILTER_STORAGE_KEY,
+    DEFAULT_COMMENT_FILTER,
+    CommentFilterSchema,
+  );
   // A comment that already lives on a review thread is that thread: the thread carries the line
   // and side the bare comment has lost, and a resolved one is finished work nobody should be
   // invited to fix again — the same call the whole-review hand-off makes.
@@ -398,22 +423,24 @@ export function PullRequestSummaryTab({
     ),
   );
 
-  const activeComments: PullRequestComment[] = [];
-  const finishedComments: PullRequestComment[] = [];
-  const botComments: PullRequestComment[] = [];
-  for (const comment of detail.comments) {
-    const finished =
-      threadByCommentId.get(comment.id)?.isResolved ||
-      pullRequestReviewOutcome(comment.reviewState) === "dismissed";
-    const bot = comment.author?.isBot === true || comment.author?.login.endsWith("[bot]");
-    (finished ? finishedComments : bot ? botComments : activeComments).push(comment);
-  }
+  const isFinished = (comment: PullRequestComment) =>
+    threadByCommentId.get(comment.id)?.isResolved === true ||
+    pullRequestReviewOutcome(comment.reviewState) === "dismissed";
+  const isBot = (comment: PullRequestComment) =>
+    comment.author?.isBot === true || comment.author?.login.endsWith("[bot]") === true;
+  const filteredComments = detail.comments.filter(
+    (comment) =>
+      (commentFilter.bots || !isBot(comment)) && (commentFilter.resolved || !isFinished(comment)),
+  );
+  // The one count the filter shows. Per-kind counts would overlap, since a resolved bot comment
+  // is both kinds and needs both shown.
+  const filteredOutCount = detail.comments.length - filteredComments.length;
   // Windowed by recency regardless of display order: expanding always reaches further back in
   // time, whether the newest comment currently reads first or last.
-  const recentComments = activeComments.slice(Math.max(0, activeComments.length - shownComments));
-  const hiddenCommentCount = activeComments.length - recentComments.length;
-  const recentBotComments = botComments.slice(Math.max(0, botComments.length - shownBotComments));
-  const hiddenBotCommentCount = botComments.length - recentBotComments.length;
+  const recentComments = filteredComments.slice(
+    Math.max(0, filteredComments.length - shownComments),
+  );
+  const hiddenCommentCount = filteredComments.length - recentComments.length;
   const [commentOrder, setCommentOrder] = useState<"newest" | "oldest">("newest");
   const visibleComments = orderPullRequestComments(recentComments, commentOrder);
   const showOldestCommentsButton =
@@ -536,6 +563,30 @@ export function PullRequestSummaryTab({
   const renderComment = (comment: PullRequestComment) => {
     const thread = threadByCommentId.get(comment.id);
     const body = visibleBody(comment.body);
+    if (isFinished(comment)) {
+      return (
+        <CollapsedComment
+          key={`${detail.url}:${comment.id}`}
+          comment={comment}
+          editing={commentEditing}
+          detail={detail}
+          thread={thread}
+          label={thread?.isResolved ? "Resolved" : "Review dismissed"}
+          body={body}
+          reactionBar={
+            <PullRequestReactionBar
+              className="ml-auto justify-end"
+              reactions={comment.reactions ?? []}
+              canReact={detail.capabilities.reactions === true}
+              subjectId={comment.id}
+              environmentId={environmentId}
+              reference={reference}
+              onRefresh={onRefresh}
+            />
+          }
+        />
+      );
+    }
     const outcome = pullRequestReviewOutcome(comment.reviewState);
     // An approval is a verdict, not a finding: there is nothing in it to fix.
     const finding: PullRequestFinding | null =
@@ -560,38 +611,37 @@ export function PullRequestSummaryTab({
       />
     );
     return (
-      <PullRequestCommentCard
+      <article
         key={`${detail.url}:${comment.id}`}
-        header={
-          <>
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <CommentIdentity comment={comment} detail={detail} />
-              {outcome ? (
-                <PullRequestReviewOutcomeBadge outcome={outcome} />
-              ) : comment.reviewState ? (
-                <span>{reviewStateLabel(comment.reviewState)}</span>
-              ) : null}
-            </div>
-            {/* Review remarks only. A plain conversation comment is talk, not a finding,
-                      and offering to fix one would promise more than it says. */}
-            {onFixFinding && finding ? (
-              <Button
-                size="xs"
-                variant="ghost"
-                className="-mt-1 shrink-0"
-                disabled={pendingFinding !== null && pendingFinding !== undefined}
-                onClick={() => onFixFinding(finding)}
-              >
-                <HammerIcon className="size-3" />
-                {pendingFinding === pullRequestFindingKey(finding)
-                  ? "Preparing..."
-                  : fixFindingLabel}
-              </Button>
-            ) : null}
-            {reactionBar}
-          </>
-        }
+        // Offscreen comments skip style, layout and paint. Bot comments carry pages of
+        // highlighted code, and the conversation is below the description either way.
+        className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:160px] [content-visibility:auto]"
       >
+        <div className="flex flex-wrap items-start gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <CommentIdentity comment={comment} detail={detail} />
+            {outcome ? (
+              <PullRequestReviewOutcomeBadge outcome={outcome} />
+            ) : comment.reviewState ? (
+              <span>{reviewStateLabel(comment.reviewState)}</span>
+            ) : null}
+          </div>
+          {/* Review remarks only. A plain conversation comment is talk, not a finding,
+                      and offering to fix one would promise more than it says. */}
+          {onFixFinding && finding ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="-mt-1 shrink-0"
+              disabled={pendingFinding !== null && pendingFinding !== undefined}
+              onClick={() => onFixFinding(finding)}
+            >
+              <HammerIcon className="size-3" />
+              {pendingFinding === pullRequestFindingKey(finding) ? "Preparing..." : fixFindingLabel}
+            </Button>
+          ) : null}
+          {reactionBar}
+        </div>
         <div className="px-3">
           <CommentLocation comment={comment} thread={thread} />
         </div>
@@ -602,7 +652,7 @@ export function PullRequestSummaryTab({
         {body === null && !commentEditing.canEdit(comment) ? null : (
           <CommentBody className="px-3 py-3" comment={comment} editing={commentEditing} />
         )}
-      </PullRequestCommentCard>
+      </article>
     );
   };
 
@@ -610,7 +660,7 @@ export function PullRequestSummaryTab({
     <div className="h-full overflow-y-auto" data-pull-request-summary-scroll>
       <section className="px-4 pt-2.5 pb-1">
         <div className="space-y-2">
-          <PullRequestMetaRow icon={<UsersIcon className="size-3.5" />} label="Reviewers">
+          <MetaRow icon={<UsersIcon className="size-3.5" />} label="Reviewers">
             <span className="flex min-w-0 flex-wrap items-center gap-1.5">
               {reviewerEntries.length === 0 ? (
                 <span className="text-muted-foreground">None</span>
@@ -691,11 +741,11 @@ export function PullRequestSummaryTab({
                 />
               ) : null}
             </span>
-          </PullRequestMetaRow>
+          </MetaRow>
           {/* The row is shown empty only where a label could be put on it from here; on a host
               with none to offer, an empty row is a row about nothing. */}
           {detail.labels.length > 0 || detail.capabilities.labels === true ? (
-            <PullRequestMetaRow icon={<TagIcon className="size-3.5" />} label="Labels">
+            <MetaRow icon={<TagIcon className="size-3.5" />} label="Labels">
               <span className="flex min-w-0 flex-wrap items-center gap-1">
                 {detail.labels.length === 0 ? (
                   <span className="text-muted-foreground">None</span>
@@ -717,12 +767,12 @@ export function PullRequestSummaryTab({
                   />
                 ) : null}
               </span>
-            </PullRequestMetaRow>
+            </MetaRow>
           ) : null}
         </div>
       </section>
 
-      <PullRequestSummarySection key={`description:${detail.url}`} title="Description" keepMounted>
+      <Section key={`description:${detail.url}`} title="Description" keepMounted>
         <div className="group">
           {bodyScope === detail.url ? (
             <PullRequestMarkdownEditor
@@ -756,9 +806,9 @@ export function PullRequestSummaryTab({
             </div>
           )}
         </div>
-      </PullRequestSummarySection>
+      </Section>
 
-      <PullRequestSummarySection key={`checks:${detail.url}`} title="Checks" defaultOpen={false}>
+      <Section key={`checks:${detail.url}`} title="Checks" defaultOpen={false}>
         {checksStale ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>Check details are out of date.</span>
@@ -814,25 +864,56 @@ export function PullRequestSummaryTab({
             );
           })
         )}
-      </PullRequestSummarySection>
+      </Section>
 
-      <PullRequestSummarySection
+      <Section
         title={`Comments (${detail.commentCount})`}
         actions={
-          <Button
-            size="xs"
-            variant="ghost-muted"
-            className="shrink-0"
-            aria-label={
-              commentOrder === "newest"
-                ? "Show oldest comments first"
-                : "Show newest comments first"
-            }
-            onClick={() => setCommentOrder((value) => (value === "newest" ? "oldest" : "newest"))}
-          >
-            <ArrowDownUpIcon aria-hidden className="size-3" />
-            {commentOrder === "newest" ? "Newest first" : "Oldest first"}
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Menu>
+              <MenuTrigger
+                render={<Button size="xs" variant="ghost-muted" />}
+                aria-label="Filter comments"
+              >
+                <ListFilterIcon aria-hidden className="size-3" />
+                {filteredOutCount > 0 ? `${filteredOutCount} hidden` : "Filter"}
+              </MenuTrigger>
+              <MenuPopup align="end">
+                <MenuGroup>
+                  <MenuGroupLabel>Show</MenuGroupLabel>
+                  <MenuCheckboxItem
+                    checked={commentFilter.bots}
+                    closeOnClick={false}
+                    onCheckedChange={(bots) => setCommentFilter((value) => ({ ...value, bots }))}
+                  >
+                    Bot comments
+                  </MenuCheckboxItem>
+                  <MenuCheckboxItem
+                    checked={commentFilter.resolved}
+                    closeOnClick={false}
+                    onCheckedChange={(resolved) =>
+                      setCommentFilter((value) => ({ ...value, resolved }))
+                    }
+                  >
+                    Resolved or dismissed
+                  </MenuCheckboxItem>
+                </MenuGroup>
+              </MenuPopup>
+            </Menu>
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              aria-label={
+                commentOrder === "newest"
+                  ? "Show oldest comments first"
+                  : "Show newest comments first"
+              }
+              onClick={() => setCommentOrder((value) => (value === "newest" ? "oldest" : "newest"))}
+            >
+              <ArrowDownUpIcon aria-hidden className="size-3" />
+              {commentOrder === "newest" ? "Newest first" : "Oldest first"}
+            </Button>
+          </div>
         }
       >
         {activityPending ? (
@@ -849,6 +930,12 @@ export function PullRequestSummaryTab({
             ) : null}
             {detail.comments.length === 0 ? (
               <p className="py-2 text-xs text-muted-foreground">No comments yet.</p>
+            ) : filteredComments.length === 0 ? (
+              <p className="py-2 text-xs text-muted-foreground">
+                {filteredOutCount === 1
+                  ? "The only comment is hidden by the filter."
+                  : `All ${filteredOutCount} comments are hidden by the filter.`}
+              </p>
             ) : (
               <div className="space-y-3">
                 {commentOrder === "oldest" ? showOldestCommentsButton : null}
@@ -864,92 +951,11 @@ export function PullRequestSummaryTab({
                     Show only {COMMENT_PAGE} recent comments
                   </Button>
                 ) : null}
-                {botComments.length > 0 ? (
-                  <CommentGroup
-                    key={`bots:${detail.url}`}
-                    label={`${botComments.length} bot comment${botComments.length === 1 ? "" : "s"}`}
-                    comments={botComments}
-                    detail={detail}
-                    onOpenChange={(open) => {
-                      if (open) setOpenedBotGroup(detail.url);
-                    }}
-                  >
-                    <div className="space-y-3 pt-2">
-                      {openedBotGroup === detail.url
-                        ? orderPullRequestComments(recentBotComments, commentOrder).map(
-                            renderComment,
-                          )
-                        : null}
-                      {hiddenBotCommentCount > 0 ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full"
-                          onClick={() =>
-                            setShownBots({
-                              url: detail.url,
-                              count: shownBotComments + COMMENT_PAGE,
-                            })
-                          }
-                        >
-                          Show {Math.min(hiddenBotCommentCount, COMMENT_PAGE)} older bot comment
-                          {hiddenBotCommentCount === 1 ? "" : "s"} ({hiddenBotCommentCount} hidden)
-                        </Button>
-                      ) : null}
-                      {shownBotComments > COMMENT_PAGE ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="w-full"
-                          onClick={() => setShownBots({ url: detail.url, count: COMMENT_PAGE })}
-                        >
-                          Show only {COMMENT_PAGE} recent bot comments
-                        </Button>
-                      ) : null}
-                    </div>
-                  </CommentGroup>
-                ) : null}
-                {finishedComments.length > 0 ? (
-                  <CommentGroup
-                    key={detail.url}
-                    label={`${finishedComments.length} resolved or dismissed comment${finishedComments.length === 1 ? "" : "s"}`}
-                    comments={finishedComments}
-                    detail={detail}
-                  >
-                    <div className="space-y-2 pt-2">
-                      {orderPullRequestComments(finishedComments, commentOrder).map((comment) => {
-                        const thread = threadByCommentId.get(comment.id);
-                        return (
-                          <CollapsedComment
-                            key={comment.id}
-                            comment={comment}
-                            editing={commentEditing}
-                            detail={detail}
-                            thread={thread}
-                            label={thread?.isResolved ? "Resolved" : "Review dismissed"}
-                            body={visibleBody(comment.body)}
-                            reactionBar={
-                              <PullRequestReactionBar
-                                className="ml-auto justify-end"
-                                reactions={comment.reactions ?? []}
-                                canReact={detail.capabilities.reactions === true}
-                                subjectId={comment.id}
-                                environmentId={environmentId}
-                                reference={reference}
-                                onRefresh={onRefresh}
-                              />
-                            }
-                          />
-                        );
-                      })}
-                    </div>
-                  </CommentGroup>
-                ) : null}
               </div>
             )}
           </>
         )}
-      </PullRequestSummarySection>
+      </Section>
     </div>
   );
 }

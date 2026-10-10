@@ -38,7 +38,7 @@ import {
   appendCodexArtifactTemplateUsePrompt,
   codexArtifactTemplateUsePrompt,
   type CodexArtifactTemplate,
-} from "@t3tools/client-runtime/codex-artifact-templates";
+} from "@t3tools/shared/codexArtifactTemplates";
 import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
   type ChatMessage,
@@ -1281,10 +1281,9 @@ export function hasServerAcknowledgedLocalDispatch(input: {
 }
 
 // Returning to the window should land the caret in the composer, so the reader can type right
-// away. The exceptions are places where focus is deliberate: another text field, a surface that
-// takes raw keys such as a device simulator screen, a terminal in the drawer or the right panel,
-// or an open dialog or popup. A focused button outside those is not one of them, so it yields to
-// the composer.
+// away. The exceptions are places where focus is deliberate: another text field, a terminal in
+// the drawer or the right panel, or an open dialog or popup. A focused button outside those is
+// not one of them, so it yields to the composer.
 export function shouldRefocusComposerOnWindowFocus(
   activeElement:
     | (Pick<Element, "tagName" | "closest" | "getAttribute"> & { isContentEditable?: boolean })
@@ -1298,8 +1297,7 @@ export function shouldRefocusComposerOnWindowFocus(
     activeElement.tagName === "IFRAME" ||
     activeElement.tagName === "WEBVIEW" ||
     activeElement.isContentEditable === true ||
-    activeElement.getAttribute("role") === "textbox" ||
-    activeElement.getAttribute("role") === "application"
+    activeElement.getAttribute("role") === "textbox"
   ) {
     return false;
   }

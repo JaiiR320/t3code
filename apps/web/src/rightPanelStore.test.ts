@@ -525,27 +525,6 @@ describe("rightPanelStore", () => {
     });
   });
 
-  it("keeps an issue tab per server, project, remote, and number beside pull requests", () => {
-    const store = useRightPanelStore.getState();
-    const issue = {
-      environmentId: "env-1",
-      projectId: "project-1",
-      remote: "origin",
-      number: 7,
-    } as const;
-    store.openPullRequest(refA, { projectId: "project-1", repository: "owner/repo", number: 7 });
-    store.openIssue(refA, issue);
-    store.openIssue(refA, { ...issue, remote: "upstream" });
-    store.openIssue(refA, issue);
-    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
-    expect(state.surfaces.map((surface) => surface.kind)).toEqual([
-      "pull-request",
-      "issue",
-      "issue",
-    ]);
-    expect(state.activeSurfaceId).toBe(state.surfaces[1]?.id);
-  });
-
   it("persists inline preference without restoring an open popover", () => {
     expect(
       migratePersistedRightPanelState({

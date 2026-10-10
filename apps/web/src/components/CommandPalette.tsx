@@ -49,7 +49,6 @@ import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
-  CircleDotIcon,
   CheckIcon,
   ChevronRightIcon,
   CornerLeftUpIcon,
@@ -69,6 +68,7 @@ import {
   SunIcon,
   TextSearchIcon,
 } from "lucide-react";
+import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import {
   useCallback,
   useDeferredValue,
@@ -747,7 +747,7 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const projects = useProjects();
   const referenceThreadRef =
-    pathname === "/source-control"
+    pathname === "/pull-requests"
       ? environments.some(
           (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
         )
@@ -761,7 +761,7 @@ function OpenCommandPaletteDialog(props: {
     activeThread?.environmentId ?? ("" as EnvironmentId),
   );
   const activeThreadReferenceCopyTarget =
-    referenceThreadRef === null || (pathname === "/source-control" && !openPanelPullRequestUrl)
+    referenceThreadRef === null || (pathname === "/pull-requests" && !openPanelPullRequestUrl)
       ? null
       : resolveThreadReferenceCopyTarget({
           threadId: referenceThreadRef.threadId,
@@ -1140,6 +1140,9 @@ function OpenCommandPaletteDialog(props: {
   );
 
   const activeThreadId = activeThread?.id;
+  const supportsThreadFind =
+    environments.find((environment) => environment.environmentId === activeThread?.environmentId)
+      ?.serverConfig?.threadFind === true;
   const currentProjectEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
@@ -1930,6 +1933,20 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  if (activeThreadId && supportsThreadFind) {
+    actionItems.push({
+      kind: "action",
+      value: "find-current-thread",
+      title: "Find in current thread",
+      searchTerms: ["find", "search", "messages", "plans"],
+      icon: <TextSearchIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "chat.find",
+      run: async () => {
+        requestThreadFindOpen();
+      },
+    });
+  }
+
   if (activeThreadReferenceCopyTarget !== null) {
     actionItems.push({
       kind: "action",
@@ -2225,30 +2242,7 @@ function OpenCommandPaletteDialog(props: {
       title: "Open pull requests",
       icon: <PullRequestGlyph.pullRequest className={ITEM_ICON_CLASS} />,
       run: async () => {
-        await navigate({
-          to: "/source-control",
-          search: { ...readPullRequestListPreferences(), tab: "pull-requests" },
-        });
-      },
-    });
-  }
-
-  if (
-    environments.some(
-      (environment) => environment.serverConfig?.environment.capabilities.issues === true,
-    )
-  ) {
-    actionItems.push({
-      kind: "action",
-      value: "action:issues",
-      searchTerms: ["issues", "github", "bugs", "repository"],
-      title: "Open issues",
-      icon: <CircleDotIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        await navigate({
-          to: "/source-control",
-          search: readPullRequestListPreferences(),
-        });
+        await navigate({ to: "/pull-requests", search: readPullRequestListPreferences() });
       },
     });
   }
@@ -3115,6 +3109,15 @@ function OpenCommandPaletteDialog(props: {
       if (activeThreadReferenceCopyTarget === null) return;
       setOpen(false);
       void copyActiveThreadReference();
+      return;
+    }
+    // ChatView ignores shortcuts while the palette is open, so handle find here
+    // instead of letting the browser's own Find open.
+    if (command === "chat.find" && activeThreadId && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      requestThreadFindOpen();
       return;
     }
 

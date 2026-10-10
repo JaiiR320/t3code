@@ -24,7 +24,7 @@ import {
   type OrchestrationV2ProjectedTurnItem,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
-import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
+import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -1836,10 +1836,6 @@ describe("shouldRefocusComposerOnWindowFocus", () => {
     expect(shouldRefocusComposerOnWindowFocus(element("TEXTAREA"))).toBe(false);
     expect(shouldRefocusComposerOnWindowFocus(element("DIV", { editable: true }))).toBe(false);
     expect(shouldRefocusComposerOnWindowFocus(element("DIV", { role: "textbox" }))).toBe(false);
-  });
-
-  it("leaves a focused device simulator screen alone", () => {
-    expect(shouldRefocusComposerOnWindowFocus(element("DIV", { role: "application" }))).toBe(false);
   });
 
   it.each(["IFRAME", "WEBVIEW"])("leaves a focused %s preview alone", (tagName) => {

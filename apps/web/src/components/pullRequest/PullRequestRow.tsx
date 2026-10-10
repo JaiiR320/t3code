@@ -74,20 +74,6 @@ function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry[
  */
 const PAGE_ROW_CLASS = "px-3 py-2.5";
 
-/** An issue row on the source control page, matching the pull request rows beside it. */
-export function sourceControlPageRowClassName(selected: boolean) {
-  return cn(
-    PULL_REQUEST_ROW_CLASS,
-    "px-3 py-2.5 [contain-intrinsic-block-size:36.5px]",
-    "cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-    // Offscreen rows are skipped for style, layout and paint: a long list costs what the
-    // viewport shows, not what the pages have loaded. The intrinsic size keeps the
-    // scrollbar honest while a row is skipped.
-    "[content-visibility:auto]",
-    selected ? "bg-accent" : "hover:bg-accent/60",
-  );
-}
-
 export type PullRequestRowTarget = Pick<
   EnvironmentPullRequestEntry,
   "environmentId" | "projectId" | "host" | "repository" | "number"
@@ -150,7 +136,7 @@ function PullRequestRowImpl({
         className={cn(
           PULL_REQUEST_ROW_CLASS,
           PAGE_ROW_CLASS,
-          "min-w-0 flex-1 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          "min-w-0 flex-1 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
         )}
       >
         <PullRequestRowGlyph
