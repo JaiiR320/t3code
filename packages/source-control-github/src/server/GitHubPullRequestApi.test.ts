@@ -3740,6 +3740,7 @@ layer("GitHubPullRequestApi.layer", (it) => {
       expect(detail.comparison).toBeNull();
       expect(detail.reviewRequestLogins).toEqual(["reviewer"]);
       expect(detail.hasTeamReviewRequest).toBe(true);
+      expect(detail.reviewRequestTeams.map((team) => team.login)).toEqual(["maintainers"]);
       expect(detail.labels).toEqual([{ name: "bug", color: "ff0000" }]);
       expect(detail.checks).toHaveLength(2);
       expect(detail.checksState).toBe("failing");

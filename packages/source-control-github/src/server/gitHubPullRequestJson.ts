@@ -46,9 +46,9 @@ const RawActorSchema = Schema.Struct({
   __typename: Schema.optional(Schema.String),
   is_bot: Schema.optional(Schema.Boolean),
   /**
-   * Optional because a review can be requested from a team or a mannequin, which the query has
-   * no fragment for and GraphQL answers with an empty object. A reviewer with no login names
-   * nobody to show, and must not fail the response the conversation travels in.
+   * Optional because a review can be requested from a team, which goes by a slug instead, or a
+   * mannequin, which the query has no fragment for and GraphQL answers with an empty object.
+   * A reviewer with neither login nor slug names nobody to show and must not fail the response.
    */
   login: Schema.optional(Schema.String),
   /** The node id, which is how a listing's authors are resolved to avatars in one request. */
@@ -56,6 +56,12 @@ const RawActorSchema = Schema.Struct({
   name: Schema.optional(Schema.NullOr(Schema.String)),
   /** Only the GraphQL API reports one; `gh pr view --json` has no avatar to give. */
   avatarUrl: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+/** A team answers with a slug where a user answers with a login, and nothing else differs. */
+const RawRequestedReviewerSchema = Schema.Struct({
+  ...RawActorSchema.fields,
+  slug: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const RawLabelSchema = Schema.Struct({
@@ -618,8 +624,7 @@ const RawReviewThreadsSchema = Schema.Struct({
             Schema.Struct({
               nodes: Schema.Array(
                 Schema.Struct({
-                  // Null for a team, which is a request nobody in particular owns.
-                  requestedReviewer: Schema.optional(Schema.NullOr(RawActorSchema)),
+                  requestedReviewer: Schema.optional(Schema.NullOr(RawRequestedReviewerSchema)),
                 }),
               ),
             }),
@@ -1052,6 +1057,7 @@ export const REVIEW_THREADS_GRAPHQL_QUERY = `query($owner: String!, $name: Strin
           requestedReviewer {
             ... on User { login name avatarUrl }
             ... on Bot { __typename login avatarUrl }
+            ... on Team { slug name avatarUrl }
           }
         }
       }
@@ -1330,6 +1336,8 @@ export interface GitHubPullRequestListItem {
   readonly reviewRequestLogins: ReadonlyArray<string>;
   /** At least one outstanding request targets a team rather than an individual login. */
   readonly hasTeamReviewRequest: boolean;
+  /** The teams asked, by slug: the reviewers a page shows before the conversation has loaded. */
+  readonly reviewRequestTeams: ReadonlyArray<PullRequestActor>;
   readonly labels: ReadonlyArray<PullRequestLabel>;
   /** Null where the head commit reported no checks, which is not the same as passing none. */
   readonly checksState: PullRequestChecksState | null;
@@ -1411,6 +1419,22 @@ function toActor(raw: Schema.Schema.Type<typeof RawActorSchema> | null | undefin
         avatarUrl: trimmed(raw?.avatarUrl),
         ...(raw?.__typename === "Bot" || raw?.is_bot === true ? { isBot: true } : {}),
       };
+}
+
+function toTeamActor(
+  raw:
+    | {
+        readonly slug?: string | null | undefined;
+        readonly name?: string | null | undefined;
+        readonly avatarUrl?: string | null | undefined;
+      }
+    | null
+    | undefined,
+): PullRequestActor | null {
+  const slug = trimmed(raw?.slug);
+  return slug === null
+    ? null
+    : { login: slug, name: trimmed(raw?.name), avatarUrl: trimmed(raw?.avatarUrl) };
 }
 
 function toCommitActor(
@@ -1742,6 +1766,10 @@ function toListItem(raw: Schema.Schema.Type<typeof RawListItemSchema>): GitHubPu
     updatedAt: raw.updatedAt,
     reviewRequestLogins: toReviewRequestLogins(raw.reviewRequests),
     hasTeamReviewRequest: hasTeamReviewRequest(raw.reviewRequests),
+    reviewRequestTeams: (raw.reviewRequests ?? []).flatMap((request) => {
+      const team = trimmed(request.login) === null ? toTeamActor(request) : null;
+      return team === null ? [] : [team];
+    }),
     labels: toLabels(raw.labels),
     checksState: rollupChecksState(raw.statusCheckRollup),
   };
@@ -2764,7 +2792,9 @@ export function decodeReviewThreadsJson(
     ...(pullRequest.reviewRequests?.nodes ?? []).map((node) => node.requestedReviewer),
     ...(pullRequest.latestReviews?.nodes ?? []).map((node) => node.author),
   ]) {
-    const actor = toActor(raw);
+    // A team, usually asked by CODEOWNERS, has no login and goes by its slug, which is also the
+    // id a review request to it is made and withdrawn with.
+    const actor = toActor(raw) ?? toTeamActor(raw);
     // Keyed by login, so someone who was asked and then answered appears once.
     if (actor !== null && !reviewers.has(actor.login)) reviewers.set(actor.login, actor);
   }
@@ -2932,12 +2962,6 @@ export const REVIEWER_CANDIDATES_GRAPHQL_QUERY = `query($owner: String!, $name: 
     }
   }
 }`;
-
-/** A team answers with a slug where a user answers with a login, and nothing else differs. */
-const RawRequestedReviewerSchema = Schema.Struct({
-  ...RawActorSchema.fields,
-  slug: Schema.optional(Schema.NullOr(Schema.String)),
-});
 
 const RawReviewerCandidatesSchema = Schema.Struct({
   data: Schema.Struct({

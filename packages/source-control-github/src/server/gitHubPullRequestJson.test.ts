@@ -667,6 +667,24 @@ describe("review thread decoding", () => {
     ]);
   });
 
+  it("lists a team asked for review, as CODEOWNERS asks, by its slug", () => {
+    const result = expectSuccess(
+      decodeReviewThreadsJson(
+        reviewJson({
+          requested: [
+            { slug: "search-discovery", name: "Search & Discovery", avatarUrl: "https://t.png" },
+            { login: "julius", avatarUrl: "https://avatars/j.png" },
+          ],
+        }),
+      ),
+    );
+
+    expect(result.reviewers).toEqual([
+      { login: "search-discovery", name: "Search & Discovery", avatarUrl: "https://t.png" },
+      { login: "julius", name: null, avatarUrl: "https://avatars/j.png" },
+    ]);
+  });
+
   it("lists someone who was asked and then answered only once", () => {
     const result = expectSuccess(
       decodeReviewThreadsJson(
@@ -680,14 +698,15 @@ describe("review thread decoding", () => {
     expect(result.reviewers).toHaveLength(1);
   });
 
-  it("skips a team request, which names nobody to show", () => {
+  it("skips a request whose reviewer is gone, which names nobody to show", () => {
     const result = expectSuccess(decodeReviewThreadsJson(reviewJson({ requested: [null] })));
 
     expect(result.reviewers).toEqual([]);
   });
 
-  it("keeps the conversation when a request is from a team, which has no login", () => {
-    // GraphQL answers with an empty object for a union member the query has no fragment for.
+  it("keeps the conversation when a reviewer has neither a login nor a slug", () => {
+    // GraphQL answers with an empty object for a union member the query has no fragment for,
+    // such as a mannequin.
     // Failing on it would take the whole response down, comments included.
     const result = expectSuccess(
       decodeReviewThreadsJson(
