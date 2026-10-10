@@ -686,7 +686,7 @@ const make = Effect.gen(function* () {
     tab.closing = true;
     clearAbortedNavigation(tab);
     // A desktop page outlives the connection unless its session closed with it.
-    const end = tab.desktop && !closeSession && sessionOpen(tab) ? "reconnect" : "gone";
+    const end = !closeSession && sessionOpen(tab) ? "reconnect" : "gone";
     for (const viewer of tab.viewers) viewer.push({ _tag: end });
     void tab.control.close().catch(constVoid);
     // The desktop owns its page; letting go only ends this connection.
@@ -903,9 +903,14 @@ const make = Effect.gen(function* () {
     page.on("close", () => dropTab(tab, true));
     page.on("crash", () => dropTab(tab, true));
     tabs.set(key, tab);
+    if (desktop)
+      await Effect.runPromise(
+        desktopChannel.hosting({ threadId: tab.threadId, tabId: tab.tabId }, true),
+      );
     reportLiveTabs();
     // A popup is already loading its own URL, and the desktop loads its tab's.
-    if (!adopted && !desktop && snapshot.navStatus._tag === "Loading") {
+    // A replacement headless page also resumes a URL the desktop already loaded.
+    if (!adopted && !desktop && snapshot.navStatus._tag !== "Idle") {
       tab.initialNavigation = page
         .goto(snapshot.navStatus.url, { waitUntil: "commit", timeout: NAVIGATION_TIMEOUT_MS })
         .then(constVoid);
@@ -1792,7 +1797,11 @@ const make = Effect.gen(function* () {
             "No recording is active for this thread.",
           );
         }
-        return tab.control.agent(request.agentSessionId ?? "", () => stopRecording(tab));
+        try {
+          return await tab.control.agent(request.agentSessionId ?? "", () => stopRecording(tab));
+        } finally {
+          void promoteDesktopTab({ threadId: tab.threadId, tabId: tab.tabId });
+        }
       }
     }
     const tab = await requireTab(request);
@@ -2381,20 +2390,42 @@ const make = Effect.gen(function* () {
     ),
     Effect.forkScoped,
   );
-  // The page came back, for example after its DevTools closed. Reconnect now
-  // rather than on the next viewer or agent, or the tab's URL and title stop
-  // reaching every client in the meantime.
-  yield* desktopChannel.attached.pipe(
-    Stream.runForEach((key) =>
-      Effect.gen(function* () {
-        if (tabs.has(tabKey(key.threadId, key.tabId))) return;
-        const { sessions } = yield* manager.list({ threadId: ThreadId.make(key.threadId) });
-        const snapshot = sessions.find(
-          (session) => session.tabId === key.tabId && session.runtime === "server",
+  // A local desktop can attach after this service has already opened a headless
+  // tab. Reconnect the same session to the native page without closing viewers.
+  const promoteDesktopTab = async (key: DesktopBrowserChannel.DesktopTabKey) => {
+    const id = tabKey(key.threadId, key.tabId);
+    await pendingTabs.get(id)?.catch(constVoid);
+    const tab = tabs.get(id);
+    if (!tab) {
+      // A withdrawn desktop page may return after DevTools close, with no viewer waiting.
+      const { sessions } = await Effect.runPromise(
+        manager.list({ threadId: ThreadId.make(key.threadId) }),
+      );
+      const snapshot = sessions.find(
+        (session) => session.tabId === key.tabId && session.runtime === "server",
+      );
+      if (snapshot) await ensureTab(snapshot).catch(constVoid);
+      return;
+    }
+    if (tab.desktop) return;
+    await tab.control
+      .system(async () => {
+        if (tabs.get(id) !== tab || !(await Effect.runPromise(desktopChannel.isAttached(key))))
+          return;
+        // Keep the streamed page and encoder together until recordingStop finishes.
+        if (tab.recording || tab.recordingStart) return;
+        const { sessions } = await Effect.runPromise(
+          manager.list({ threadId: ThreadId.make(key.threadId) }),
         );
-        if (snapshot) yield* Effect.promise(() => ensureTab(snapshot).catch(constVoid));
-      }).pipe(Effect.ignore),
-    ),
+        const snapshot = sessions.find((session) => session.tabId === key.tabId);
+        if (!snapshot || snapshot.runtime !== "server") return;
+        dropTab(tab, false);
+        await ensureTab(snapshot).catch(constVoid);
+      })
+      .catch(constVoid);
+  };
+  yield* desktopChannel.attached.pipe(
+    Stream.runForEach((key) => Effect.promise(() => promoteDesktopTab(key))),
     Effect.forkScoped,
   );
   yield* Effect.sync(closeIdleAgentTabs).pipe(

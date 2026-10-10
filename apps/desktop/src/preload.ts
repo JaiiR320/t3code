@@ -317,6 +317,27 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
   },
   preview: {
+    onBrowserHostingChange: (listener) => {
+      const wrapped = (
+        _event: Electron.IpcRendererEvent,
+        value: {
+          key: { environmentId?: string; threadId: string; tabId: string };
+          hosting: boolean;
+        },
+      ) => listener(value);
+      ipcRenderer.on(IpcChannels.PREVIEW_BROWSER_HOSTING_CHANGE_CHANNEL, wrapped);
+      return () =>
+        ipcRenderer.removeListener(IpcChannels.PREVIEW_BROWSER_HOSTING_CHANGE_CHANNEL, wrapped);
+    },
+    connectLocalBrowser: (environmentId, endpoint) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_CONNECT_LOCAL_BROWSER_CHANNEL, {
+        environmentId,
+        ...endpoint,
+      }),
+    disconnectLocalBrowser: (environmentId) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_DISCONNECT_LOCAL_BROWSER_CHANNEL, { environmentId }),
+    isLocalBrowserConnected: (environmentId) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_LOCAL_BROWSER_CONNECTED_CHANNEL, { environmentId }),
     setForwardedShortcuts: (shortcuts) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_SET_FORWARDED_SHORTCUTS_CHANNEL, shortcuts),
     createTab: (tabId, defaults) =>

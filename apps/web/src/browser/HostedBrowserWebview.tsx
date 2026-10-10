@@ -62,6 +62,7 @@ export function HostedBrowserWebview(props: {
   readonly zoomFactor: number;
   /** A tab of the desktop's own server; the server drives this webview's page. */
   readonly serverDriven?: boolean;
+  readonly serverHostEnvironmentId?: string | undefined;
   /**
    * For a server-driven tab, the appearance and zoom its environment published,
    * which this webview follows so every client and agent sees one state.
@@ -81,6 +82,7 @@ export function HostedBrowserWebview(props: {
     zoomFactor,
     profileId,
     serverDriven = false,
+    serverHostEnvironmentId,
     serverRendering,
   } = props;
   const clientSettingsHydrated = useClientSettingsHydrated();
@@ -119,14 +121,27 @@ export function HostedBrowserWebview(props: {
     crashRecoveryRef.current = INITIAL_WEBVIEW_CRASH_RECOVERY_STATE;
     const lease = acquireDesktopTab(
       runtimeTabId,
-      serverDriven ? { threadId: threadRef.threadId, tabId } : undefined,
+      serverDriven
+        ? {
+            threadId: threadRef.threadId,
+            tabId,
+            ...(serverHostEnvironmentId ? { environmentId: serverHostEnvironmentId } : {}),
+          }
+        : undefined,
     );
     tabLeaseRef.current = lease;
     return () => {
       if (tabLeaseRef.current === lease) tabLeaseRef.current = null;
       lease.release();
     };
-  }, [clientSettingsHydrated, runtimeTabId, serverDriven, tabId, threadRef.threadId]);
+  }, [
+    clientSettingsHydrated,
+    runtimeTabId,
+    serverDriven,
+    serverHostEnvironmentId,
+    tabId,
+    threadRef.threadId,
+  ]);
 
   // A server tab looks the way its environment published, once the desktop tab exists.
   useEffect(() => {

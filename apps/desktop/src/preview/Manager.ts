@@ -111,8 +111,12 @@ export interface PreviewTabState {
   audible: boolean;
   controller: "human" | "agent" | "none";
   favicon?: DesktopPreviewFavicon;
-  /** Set for a tab of the desktop's own server, which drives it over the browser channel. */
-  serverTab?: { readonly threadId: string; readonly tabId: string };
+  /** Set for a local server tab driven over the desktop browser channel. */
+  serverTab?: {
+    readonly threadId: string;
+    readonly tabId: string;
+    readonly environmentId?: string | undefined;
+  };
   updatedAt: string;
 }
 
@@ -3309,7 +3313,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
    * drives here. The live cursor and desktop recordings draw it like any agent.
    */
   const emitAgentPointer = Effect.fn("PreviewManager.emitAgentPointer")(function* (pointer: {
-    readonly key: { readonly threadId: string; readonly tabId: string };
+    readonly key: {
+      readonly threadId: string;
+      readonly tabId: string;
+      readonly environmentId?: string | undefined;
+    };
     readonly phase: "move" | "click";
     readonly x: number;
     readonly y: number;
@@ -3317,7 +3325,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const tab = [...(yield* SynchronizedRef.get(tabsRef)).values()].find(
       (candidate) =>
         candidate.serverTab?.threadId === pointer.key.threadId &&
-        candidate.serverTab.tabId === pointer.key.tabId,
+        candidate.serverTab.tabId === pointer.key.tabId &&
+        candidate.serverTab.environmentId === pointer.key.environmentId,
     );
     if (!tab) return;
     const event: DesktopPreviewPointerEvent = {

@@ -2,6 +2,7 @@ import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequ
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  AuthPreviewOperateScope,
   PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
   PreviewStreamHostSetup,
 } from "@t3tools/contracts";
@@ -24,6 +25,7 @@ import { authenticateMediaRequest } from "../auth/http.ts";
 import { assetResponseHeaders } from "../http.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
+import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
 
 const PREVIEW_STREAM_ROUTE_PREFIX = "/api/preview-stream";
 /** Matches `PREVIEW_STREAM_TAB_GONE_CODE` in the client. */
@@ -50,11 +52,20 @@ const parseMessage = (chunk: Uint8Array | string): unknown => {
   }
 };
 
-const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
+const makeHandler = (
+  browser: ServerBrowser.ServerBrowser["Service"],
+  desktopChannel: DesktopBrowserChannel.DesktopBrowserChannel["Service"],
+) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
     if (Option.isNone(url)) return HttpServerResponse.text("Bad Request", { status: 400 });
+    if (url.value.pathname === `${PREVIEW_STREAM_ROUTE_PREFIX}/desktop-host`) {
+      yield* authenticateMediaRequest(AuthPreviewOperateScope);
+      return HttpServerResponse.jsonUnsafe(desktopChannel.localEndpoint, {
+        headers: { "cache-control": "no-store" },
+      });
+    }
     if (url.value.pathname === `${PREVIEW_STREAM_ROUTE_PREFIX}/download`) {
       return yield* serveDownload(browser, url.value.searchParams);
     }
@@ -278,10 +289,11 @@ const receiveUpload = (browser: ServerBrowser.ServerBrowser["Service"], params: 
 export const routeLayer = HttpRouter.use((router) =>
   Effect.gen(function* () {
     const browser = yield* ServerBrowser.ServerBrowser;
+    const desktopChannel = yield* DesktopBrowserChannel.DesktopBrowserChannel;
     const platform = yield* Effect.context<
       HttpPlatform.HttpPlatform | FileSystem.FileSystem | Path.Path
     >();
-    const handler = makeHandler(browser).pipe(Effect.provideContext(platform));
+    const handler = makeHandler(browser, desktopChannel).pipe(Effect.provideContext(platform));
     yield* router.add("GET", `${PREVIEW_STREAM_ROUTE_PREFIX}/*`, handler);
     yield* router.add("POST", `${PREVIEW_STREAM_ROUTE_PREFIX}/upload`, handler);
   }),

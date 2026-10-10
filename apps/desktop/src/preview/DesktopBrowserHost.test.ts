@@ -2,6 +2,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { DesktopBrowserEvent } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -89,6 +90,78 @@ describe("DesktopBrowserHost", () => {
       // Only the new connection's reply arrives; the old one's id could collide.
       expect(reply).toMatchObject({ type: "cdp" });
       expect(decodeCdpReply((reply as { message: string }).message).id).toBe(2);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("isolates identical tab keys and ignores a command's claimed environment", () =>
+    Effect.gen(function* () {
+      const host = yield* DesktopBrowserHost.make;
+      const a = makeDebuggee();
+      const b = makeDebuggee();
+      host.attach({ ...key, environmentId: "a" }, a.tab);
+      host.attach({ ...key, environmentId: "b" }, b.tab);
+      const ready = yield* Deferred.make<void>();
+      const reader = yield* host.eventsFor("a").pipe(
+        Stream.tap((event) => {
+          const decoded = decodeEvent(new TextDecoder().decode(event));
+          return decoded.type === "attached" ? Deferred.succeed(ready, undefined) : Effect.void;
+        }),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Deferred.await(ready);
+      // An event subscription in b must not reset a's active relay.
+      yield* host.handleCommandLineFor(
+        "a",
+        encodeJson({
+          type: "cdp",
+          ...key,
+          environmentId: "b",
+          message: encodeJson({ id: 7, method: "DOM.enable", sessionId: "t3-preview-page" }),
+        }),
+      );
+      expect(yield* host.eventsFor("b").pipe(Stream.take(1), Stream.runCollect)).toHaveLength(1);
+      b.release();
+      a.release();
+      const events = (yield* Fiber.join(reader)).map((line) =>
+        decodeEvent(new TextDecoder().decode(line)),
+      );
+      expect(events[0]).toEqual({ type: "attached", ...key });
+      expect(events[1]).toMatchObject({ type: "cdp" });
+      expect(decodeCdpReply((events[1] as { message: string }).message).id).toBe(7);
+      // Scoped detach must leave b attached.
+      host.detach({ ...key, environmentId: "a" });
+      const remaining = yield* host.eventsFor("b").pipe(Stream.take(1), Stream.runCollect);
+      expect(decodeEvent(new TextDecoder().decode(remaining[0]))).toEqual({
+        type: "attached",
+        ...key,
+      });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("reports scoped hosting and clears it on release and detach", () =>
+    Effect.gen(function* () {
+      const host = yield* DesktopBrowserHost.make;
+      const a = { ...key, environmentId: "a" };
+      const b = { ...key, environmentId: "b" };
+      host.attach(a, makeDebuggee().tab);
+      host.attach(b, makeDebuggee().tab);
+      const reader = yield* host.hosting.pipe(Stream.take(4), Stream.runCollect, Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* host.handleCommandLineFor(
+        "a",
+        encodeJson({ type: "hosting", ...key, environmentId: "b", hosting: true }),
+      );
+      yield* host.handleCommandLineFor("b", encodeJson({ type: "hosting", ...key, hosting: true }));
+      yield* host.handleCommandLineFor("a", encodeJson({ type: "release", ...key }));
+      host.detach(b);
+      expect(yield* Fiber.join(reader)).toEqual([
+        { key: a, hosting: true },
+        { key: b, hosting: true },
+        { key: a, hosting: false },
+        { key: b, hosting: false },
+      ]);
     }).pipe(Effect.scoped),
   );
 

@@ -41,17 +41,21 @@ vi.mock("./ServerBrowserContexts.ts", () => ({
     async contextFor(profileId: string, isolationKey?: string) {
       contextRequests.push({ profileId, isolated: isolationKey !== undefined });
       if (contextFailure) throw contextFailure;
+      contextRequested?.resolve();
       await contextGate?.promise;
       const context = makeContext(this.onClose);
       contexts.push(context);
       return context as unknown as BrowserContext;
     }
     async scratchPage() {
-      return makeContext().page as unknown as Page;
+      const encoder = makeScratchPage();
+      scratchPages.push(encoder);
+      return encoder as unknown as Page;
     }
     async connectDesktopPage(endpoint: string) {
       const context = makeContext();
       desktopConnections.push({ endpoint, context });
+      desktopConnected?.resolve();
       return { browser: { close: async () => {} }, page: context.page as unknown as Page };
     }
     async close() {
@@ -149,10 +153,30 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
   return context;
 }
 
+function makeScratchPage() {
+  return {
+    ...makeContext().page,
+    evaluate: vi.fn(async (expression: unknown) => {
+      if (typeof expression === "string") return undefined;
+      const source = String(expression);
+      if (source.includes("__t3Recorder.stop"))
+        return { mimeType: "video/webm", bytes: 5, count: 1 };
+      if (source.includes("__t3Recorder.chunk")) return Buffer.from("video").toString("base64");
+      return true;
+    }),
+  };
+}
+const scratchPages: ReturnType<typeof makeScratchPage>[] = [];
+let nativeHostingReady: PromiseWithResolvers<void> | null = null;
+let desktopAttachmentChecked: PromiseWithResolvers<void> | null = null;
+const hostingChanges: Array<{ tabId: string; hosting: boolean }> = [];
+
 const contexts: ReturnType<typeof makeContext>[] = [];
 /** The profile and isolation each headless tab asked its context for. */
 const contextRequests: Array<{ profileId: string; isolated: boolean }> = [];
 let contextGate: PromiseWithResolvers<void> | null = null;
+let contextRequested: PromiseWithResolvers<void> | null = null;
+let desktopConnected: PromiseWithResolvers<void> | null = null;
 type ClipboardBinding = (source: { page: unknown }, text: unknown) => void;
 let clipboardBinding: ClipboardBinding | null = null;
 let contextFailure: Error | null = null;
@@ -160,6 +184,9 @@ let contextFailure: Error | null = null;
 let desktopRendersNext = false;
 /** Pages the fake desktop takes back or returns; the channel's streams emit them. */
 const desktopDetaches = new NodeEvents.EventEmitter();
+const desktopAttaches = new NodeEvents.EventEmitter();
+let desktopAttachSubscribed = Promise.withResolvers<void>();
+let desktopDetachSubscribed = Promise.withResolvers<void>();
 const desktopTabs = new Set<string>();
 const desktopRenders = (tabId: string) => {
   if (desktopRendersNext) {
@@ -202,6 +229,24 @@ const dependencies = Layer.mergeAll(
   Layer.succeed(DesktopChannel.DesktopBrowserChannel, {
     // Only tabs a test marks render on the desktop; the rest stay headless.
     available: true,
+    localEndpoint: null,
+    hosting: (key, hosting) =>
+      Effect.sync(() => {
+        hostingChanges.push({ tabId: key.tabId, hosting });
+        if (hosting) nativeHostingReady?.resolve();
+      }),
+    attached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const onAttach = (key: { threadId: string; tabId: string }) =>
+            Queue.offerUnsafe(queue, key);
+          desktopAttaches.on("attach", onAttach);
+          desktopAttachSubscribed.resolve();
+          return onAttach;
+        }),
+        (onAttach) => Effect.sync(() => desktopAttaches.off("attach", onAttach)),
+      ),
+    ),
     awaitAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
     detached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
       Effect.acquireRelease(
@@ -209,23 +254,17 @@ const dependencies = Layer.mergeAll(
           const onDetach = (key: { threadId: string; tabId: string }) =>
             Queue.offerUnsafe(queue, key);
           desktopDetaches.on("detach", onDetach);
+          desktopDetachSubscribed.resolve();
           return onDetach;
         }),
         (onDetach) => Effect.sync(() => desktopDetaches.off("detach", onDetach)),
       ),
     ),
-    attached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          const onAttach = (key: { threadId: string; tabId: string }) =>
-            Queue.offerUnsafe(queue, key);
-          desktopDetaches.on("attach", onAttach);
-          return onAttach;
-        }),
-        (onAttach) => Effect.sync(() => desktopDetaches.off("attach", onAttach)),
-      ),
-    ),
-    isAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
+    isAttached: (key) =>
+      Effect.sync(() => {
+        desktopAttachmentChecked?.resolve();
+        return desktopRenders(key.tabId);
+      }),
     endpoint: (key) =>
       Effect.acquireRelease(Effect.succeed(`ws://desktop/${key.tabId}`), () =>
         Effect.sync(() => releasedDesktopTabs.push(key.tabId)),
@@ -270,9 +309,17 @@ const viewerInput = (tabId: string, canOperate: boolean) => ({
 beforeEach(() => {
   contexts.length = 0;
   contextRequests.length = 0;
+  scratchPages.length = 0;
+  hostingChanges.length = 0;
+  nativeHostingReady = null;
+  desktopAttachmentChecked = null;
   contextGate = null;
+  contextRequested = null;
+  desktopConnected = null;
   contextFailure = null;
   desktopTabs.clear();
+  desktopAttachSubscribed = Promise.withResolvers<void>();
+  desktopDetachSubscribed = Promise.withResolvers<void>();
   desktopRendersNext = false;
   releasedDesktopTabs.length = 0;
   desktopConnections.length = 0;
@@ -1532,10 +1579,156 @@ it.live("a desktop page that comes back reconnects without waiting for a viewer"
       // DevTools opened, then closed: the desktop withdraws the page and returns it.
       desktopDetaches.emit("detach", { threadId: scope.thread.threadId, tabId: opened.tabId });
       while (releasedDesktopTabs.length === 0) yield* Effect.yieldNow;
-      desktopDetaches.emit("attach", { threadId: scope.thread.threadId, tabId: opened.tabId });
+      desktopAttaches.emit("attach", { threadId: scope.thread.threadId, tabId: opened.tabId });
       // Without a viewer or agent, the server drives the page again, so its URL keeps reaching clients.
       while (desktopConnections.length < 2) yield* Effect.yieldNow;
       expect(desktopConnections).toHaveLength(2);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("promotes a headless tab to the attached desktop page and reconnects its viewer", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, broker, tabId } = yield* ready;
+      const manager = yield* Manager.PreviewManager;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, false));
+      const headless = contexts[0]!.page;
+      const before = yield* manager.list({ threadId: scope.thread.threadId });
+      yield* Effect.promise(() => desktopAttachSubscribed.promise);
+      desktopTabs.add(tabId);
+      desktopAttaches.emit("attach", { threadId: scope.thread.threadId, tabId });
+      let output = yield* Queue.take(viewer.output);
+      while (output._tag !== "reconnect" && output._tag !== "gone")
+        output = yield* Queue.take(viewer.output);
+      expect(output._tag).toBe("reconnect");
+      yield* browser.attachViewer(viewerInput(tabId, false));
+      expect(desktopConnections.map((connection) => connection.endpoint)).toEqual([
+        `ws://desktop/${tabId}`,
+      ]);
+      expect(headless.close).toHaveBeenCalled();
+      const after = yield* manager.list({ threadId: scope.thread.threadId });
+      expect(after.sessions.map((session) => session.tabId)).toEqual(
+        before.sessions.map((session) => session.tabId),
+      );
+      const native = desktopConnections[0]!.context.page;
+      yield* broker.invoke({
+        scope,
+        tabId,
+        operation: "navigate",
+        input: { url: "https://example.com/native" },
+      });
+      expect(native.goto).toHaveBeenCalledWith("https://example.com/native", expect.anything());
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("an attachment during headless creation promotes the page once creation finishes", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      yield* ServerBrowser.ServerBrowser;
+      const manager = yield* Manager.PreviewManager;
+      yield* Effect.yieldNow;
+      yield* Effect.promise(() => desktopAttachSubscribed.promise);
+      contextRequested = Promise.withResolvers<void>();
+      contextGate = Promise.withResolvers<void>();
+      desktopConnected = Promise.withResolvers<void>();
+      const opened = yield* manager.open({ threadId: scope.thread.threadId, runtime: "server" });
+      yield* Effect.promise(() => contextRequested!.promise);
+      desktopTabs.add(opened.tabId);
+      desktopAttaches.emit("attach", { threadId: scope.thread.threadId, tabId: opened.tabId });
+      // Let the attachment consumer observe the pending creation before unblocking Chromium.
+      yield* Effect.yieldNow;
+      contextGate.resolve();
+      yield* Effect.promise(() => desktopConnected!.promise);
+      expect(desktopConnections.map((connection) => connection.endpoint)).toEqual([
+        `ws://desktop/${opened.tabId}`,
+      ]);
+      expect(contexts[0]!.page.close).toHaveBeenCalled();
+      const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
+      expect(sessions.map((session) => session.tabId)).toEqual([opened.tabId]);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("keeps an active recording intact before promoting its tab to the desktop", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const fileSystem = yield* FileSystem.FileSystem;
+      yield* broker.invoke({ scope, tabId, operation: "recordingStart", input: {} });
+      const encoder = scratchPages[0]!;
+      yield* Effect.promise(() => desktopAttachSubscribed.promise);
+      nativeHostingReady = Promise.withResolvers<void>();
+      desktopAttachmentChecked = Promise.withResolvers<void>();
+      desktopTabs.add(tabId);
+      desktopAttaches.emit("attach", { threadId: scope.thread.threadId, tabId });
+      yield* Effect.promise(() => desktopAttachmentChecked!.promise);
+      // A subsequent agent request runs after the attachment's queued ownership check.
+      yield* broker.invoke({ scope, tabId, operation: "status", input: {} });
+      expect(desktopConnections).toEqual([]);
+      expect(hostingChanges).toEqual([]);
+      expect(encoder.close).not.toHaveBeenCalled();
+      const recording = yield* broker.invoke<{
+        tabId: string;
+        path: string;
+        mimeType: string;
+        sizeBytes: number;
+      }>({
+        scope,
+        tabId,
+        operation: "recordingStop",
+        input: {},
+      });
+      expect(recording).toMatchObject({ tabId, mimeType: "video/webm", sizeBytes: 5 });
+      expect(yield* fileSystem.readFileString(recording.path)).toBe("video");
+      expect(encoder.close).toHaveBeenCalledOnce();
+      yield* Effect.promise(() => nativeHostingReady!.promise);
+      expect(desktopConnections.map((connection) => connection.endpoint)).toEqual([
+        `ws://desktop/${tabId}`,
+      ]);
+      expect(hostingChanges).toContainEqual({ tabId, hosting: true });
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("restores a disconnected native tab's URL when a viewer reconnects headlessly", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const manager = yield* Manager.PreviewManager;
+      yield* Effect.yieldNow;
+      desktopRendersNext = true;
+      const url = "https://example.com/native-session";
+      const opened = yield* manager.open({
+        threadId: scope.thread.threadId,
+        runtime: "server",
+        url,
+      });
+      const viewer = yield* browser.attachViewer(viewerInput(opened.tabId, false));
+      yield* manager.reportStatus({
+        threadId: scope.thread.threadId,
+        tabId: opened.tabId,
+        navStatus: { _tag: "Success", url, title: "Native session" },
+        canGoBack: false,
+        canGoForward: false,
+        serverControlled: true,
+      });
+      const before = yield* manager.list({ threadId: scope.thread.threadId });
+      expect(before.sessions.find((session) => session.tabId === opened.tabId)).toMatchObject({
+        navStatus: { _tag: "Success", url },
+      });
+      yield* Effect.promise(() => desktopDetachSubscribed.promise);
+      desktopTabs.delete(opened.tabId);
+      desktopDetaches.emit("detach", { threadId: scope.thread.threadId, tabId: opened.tabId });
+      let output = yield* Queue.take(viewer.output);
+      while (output._tag !== "reconnect" && output._tag !== "gone")
+        output = yield* Queue.take(viewer.output);
+      expect(output._tag).toBe("reconnect");
+      yield* browser.attachViewer(viewerInput(opened.tabId, false));
+      expect(contexts[0]!.page.goto).toHaveBeenCalledWith(url, expect.anything());
+      const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
+      expect(sessions.map((session) => session.tabId)).toEqual([opened.tabId]);
     }),
   ).pipe(Effect.provide(layer)),
 );

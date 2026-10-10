@@ -14,6 +14,7 @@ import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from "./settings.ts";
 import type { EditorId } from "./editor.ts";
 import type { PreviewForwardedShortcut } from "./keybindings.ts";
+import type { LocalDesktopBrowserEndpoint } from "./desktopBrowser.ts";
 
 import type {
   DesktopAppActivationRequest,
@@ -1036,15 +1037,25 @@ export const DesktopPreviewCreateTabInputSchema = Schema.Struct({
   zoomFactor: Schema.optional(Schema.Number.check(Schema.isGreaterThan(0))),
   colorScheme: Schema.optional(DesktopPreviewColorSchemeSchema),
   serverTab: Schema.optional(
-    Schema.Struct({ threadId: TrimmedNonEmptyString, tabId: TrimmedNonEmptyString }),
+    Schema.Struct({
+      threadId: TrimmedNonEmptyString,
+      tabId: TrimmedNonEmptyString,
+      environmentId: Schema.optional(TrimmedNonEmptyString),
+    }),
   ),
 });
 
 export interface DesktopPreviewTabDefaults {
   readonly zoomFactor?: number | undefined;
   readonly colorScheme?: DesktopPreviewColorScheme | undefined;
-  /** A tab of the desktop's own server: the server drives it through the desktop browser channel. */
-  readonly serverTab?: { readonly threadId: string; readonly tabId: string } | undefined;
+  /** A local server tab driven through the desktop browser channel. */
+  readonly serverTab?:
+    | {
+        readonly threadId: string;
+        readonly tabId: string;
+        readonly environmentId?: string | undefined;
+      }
+    | undefined;
 }
 
 export const DesktopPreviewRegisterWebviewInputSchema = Schema.Struct({
@@ -1270,6 +1281,22 @@ export interface DesktopBridge {
 export const DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER = "__t3DesktopPreviewRecordingCapture";
 
 export interface DesktopPreviewBridge {
+  onBrowserHostingChange?: (
+    listener: (event: {
+      readonly key: {
+        readonly environmentId?: string | undefined;
+        readonly threadId: string;
+        readonly tabId: string;
+      };
+      readonly hosting: boolean;
+    }) => void,
+  ) => () => void;
+  connectLocalBrowser?: (
+    environmentId: string,
+    endpoint: LocalDesktopBrowserEndpoint,
+  ) => Promise<boolean>;
+  disconnectLocalBrowser?: (environmentId: string) => Promise<void>;
+  isLocalBrowserConnected?: (environmentId: string) => Promise<boolean>;
   setForwardedShortcuts?: (shortcuts: ReadonlyArray<PreviewForwardedShortcut>) => Promise<void>;
   createTab: (tabId: string, defaults?: DesktopPreviewTabDefaults) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;

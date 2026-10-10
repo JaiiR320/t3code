@@ -23,15 +23,20 @@ import {
   INCOGNITO_BROWSER_PROFILE_ID,
   PreviewForwardedShortcut,
   MAX_KEYBINDINGS_COUNT,
+  DesktopLocalBrowserConnectInput,
+  TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
+import * as LocalDesktopBrowserConnection from "../../preview/LocalDesktopBrowserConnection.ts";
+import * as DesktopBrowserHost from "../../preview/DesktopBrowserHost.ts";
 import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
 import * as IpcChannels from "../channels.ts";
@@ -42,6 +47,13 @@ export const installPreviewEventForwarding = Effect.fn(
 )(function* () {
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const manager = yield* PreviewManager.PreviewManager;
+  const browserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
+  yield* browserHost.hosting.pipe(
+    Stream.runForEach((event) =>
+      electronWindow.sendAll(IpcChannels.PREVIEW_BROWSER_HOSTING_CHANGE_CHANNEL, event),
+    ),
+    Effect.forkScoped,
+  );
   yield* manager.subscribeStateChanges((tabId, state) =>
     electronWindow.sendAll(IpcChannels.PREVIEW_STATE_CHANGE_CHANNEL, tabId, state),
   );
@@ -82,6 +94,38 @@ export const createTab = DesktopIpc.makeIpcMethod({
     const manager = yield* PreviewManager.PreviewManager;
     yield* manager.createTab(tabId, { zoomFactor, colorScheme, serverTab });
   }),
+});
+
+const localBrowserEnvironment = Schema.Struct({ environmentId: TrimmedNonEmptyString });
+
+const connectLocalBrowser = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_CONNECT_LOCAL_BROWSER_CHANNEL,
+  payload: DesktopLocalBrowserConnectInput,
+  result: Schema.Boolean,
+  handler: (input) =>
+    Effect.flatMap(LocalDesktopBrowserConnection.LocalDesktopBrowserConnection, (connection) =>
+      connection.connect(input),
+    ),
+});
+
+const disconnectLocalBrowser = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_DISCONNECT_LOCAL_BROWSER_CHANNEL,
+  payload: localBrowserEnvironment,
+  result: Schema.Void,
+  handler: ({ environmentId }) =>
+    Effect.flatMap(LocalDesktopBrowserConnection.LocalDesktopBrowserConnection, (connection) =>
+      connection.disconnect(environmentId),
+    ),
+});
+
+const isLocalBrowserConnected = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_LOCAL_BROWSER_CONNECTED_CHANNEL,
+  payload: localBrowserEnvironment,
+  result: Schema.Boolean,
+  handler: ({ environmentId }) =>
+    Effect.flatMap(LocalDesktopBrowserConnection.LocalDesktopBrowserConnection, (connection) =>
+      connection.isConnected(environmentId),
+    ),
 });
 
 export const closeTab = DesktopIpc.makeIpcMethod({
@@ -466,4 +510,10 @@ export const methods = [
   startRecording,
   stopRecording,
   saveRecording,
+] as const;
+
+export const localBrowserMethods = [
+  connectLocalBrowser,
+  disconnectLocalBrowser,
+  isLocalBrowserConnected,
 ] as const;

@@ -6,6 +6,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { type ComponentProps, useEffect, useMemo, useRef, useState } from "react";
 
 import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
+import { environmentCatalog } from "~/connection/catalog";
 
 import { isElectron } from "~/env";
 import { useClientSettingsHydrated } from "~/hooks/useSettings";
@@ -20,24 +21,28 @@ import { useBrowserDefaults } from "./browserDefaults";
 import { useBrowserPointerStore } from "./browserPointerStore";
 import { HostedBrowserWebview } from "./HostedBrowserWebview";
 import { openUrlInPreview } from "./openFileInPreview";
-import { rendersServerTabNatively } from "./previewRuntime";
 import { previewRuntimeTabId } from "./previewRuntimeTabId";
+import { LocalBrowserService } from "./LocalBrowserService";
+import { useLocalBrowserHostStore } from "./localBrowserHostStore";
 
 export function ElectronBrowserHost() {
   const { resolvedTheme } = useTheme();
   const previewByThreadKey = useActivePreviewSessions();
   const primaryEnvironmentId = useAtomValue(primaryEnvironmentIdAtom);
+  const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
+  const localHosts = useLocalBrowserHostStore((state) => state.connected);
   const sessions = useMemo(
     () =>
       Object.entries(previewByThreadKey).flatMap(([threadKey, previewState]) => {
         const threadRef = parseScopedThreadKey(threadKey);
-        // Server tabs of other environments stream; this desktop's own server tabs render here.
+        // Only a bundled backend or a proven local IPC host may mount server tabs here.
         return threadRef
           ? Object.values(previewState.sessions)
               .filter(
                 (snapshot) =>
                   snapshot.runtime !== "server" ||
-                  rendersServerTabNatively(threadRef.environmentId, primaryEnvironmentId, snapshot),
+                  threadRef.environmentId === primaryEnvironmentId ||
+                  localHosts[threadRef.environmentId] === true,
               )
               .map((snapshot) => ({
                 threadRef,
@@ -53,7 +58,7 @@ export function ElectronBrowserHost() {
               }))
           : [];
       }),
-    [previewByThreadKey, primaryEnvironmentId],
+    [previewByThreadKey, primaryEnvironmentId, localHosts],
   );
 
   useEffect(() => {
@@ -122,10 +127,22 @@ export function ElectronBrowserHost() {
       });
     });
   }, [openPreview]);
+  useEffect(
+    () =>
+      window.desktopBridge?.preview?.onBrowserHostingChange?.((event) => {
+        useLocalBrowserHostStore.getState().setHosting(event.key, event.hosting);
+      }),
+    [],
+  );
 
   if (!isElectron) return null;
   return (
     <div className="contents" data-electron-browser-host>
+      {[...catalog.entries.keys()]
+        .filter((id) => id !== primaryEnvironmentId)
+        .map((environmentId) => (
+          <LocalBrowserService key={environmentId} environmentId={environmentId} />
+        ))}
       {sessions.map(({ threadRef, snapshot, runtimeTabId, pictureInPicture, zoomFactor }) => {
         const url = snapshot.navStatus._tag === "Idle" ? null : snapshot.navStatus.url;
         return (
@@ -140,6 +157,9 @@ export function ElectronBrowserHost() {
             profileId={snapshot.profileId}
             zoomFactor={zoomFactor}
             serverDriven={snapshot.runtime === "server"}
+            serverHostEnvironmentId={
+              localHosts[threadRef.environmentId] ? threadRef.environmentId : undefined
+            }
             {...(snapshot.runtime === "server"
               ? {
                   serverRendering: {

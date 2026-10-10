@@ -5,6 +5,7 @@ import { expect, it } from "@effect/vitest";
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  AuthPreviewOperateScope,
   AuthSessionId,
   PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
   PreviewStreamHostSetup,
@@ -21,10 +22,22 @@ import { HttpRouter, HttpServer } from "effect/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
+import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
 import { routeLayer } from "./ServerBrowserStream.ts";
 
-const platformLayer = NodeHttpPlatform.layer.pipe(Layer.provideMerge(NodeServices.layer));
+const localEndpoint = {
+  socketPath: "/tmp/t3-desktop-browser-test/host.sock",
+  token: "local-host-token",
+};
+const desktopChannelLayer = Layer.mock(DesktopBrowserChannel.DesktopBrowserChannel, {
+  available: false,
+  localEndpoint,
+});
+const platformLayer = NodeHttpPlatform.layer.pipe(
+  Layer.provideMerge(NodeServices.layer),
+  Layer.merge(desktopChannelLayer),
+);
 
 const makeAuth = (
   scopes: ReadonlyArray<AuthEnvironmentScope>,
@@ -62,6 +75,38 @@ const mutations = [
   { type: "dialog", accept: true },
   { type: "viewport", setting: { _tag: "fill" } },
 ];
+
+it.effect.each([
+  { scopes: [AuthPreviewOperateScope], status: 200 },
+  { scopes: [AuthOrchestrationReadScope], status: 403 },
+])("only preview operators can discover the local browser socket (%s)", ({ scopes, status }) =>
+  Effect.gen(function* () {
+    const auth = makeAuth(scopes);
+    const browser = Layer.mock(ServerBrowser.ServerBrowser, {});
+    const handler = yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        HttpRouter.toWebHandler(
+          routeLayer.pipe(
+            Layer.provide(browser),
+            Layer.provide(platformLayer),
+            Layer.provideMerge(auth.layer),
+          ),
+          { disableLogger: true },
+        ),
+      ),
+      ({ dispose }) => Effect.promise(dispose),
+    );
+    const response = yield* Effect.promise(() =>
+      handler.handler(new Request("http://t3.test/api/preview-stream/desktop-host")),
+    );
+    expect(response.status).toBe(status);
+    if (status === 200) {
+      expect(yield* Effect.promise(() => response.json())).toEqual(localEndpoint);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+    }
+    expect(auth.requests).toEqual(["http://t3.test/api/preview-stream/desktop-host"]);
+  }).pipe(Effect.scoped),
+);
 
 it.effect.each([
   { hasOperateScope: false, interactive: true },

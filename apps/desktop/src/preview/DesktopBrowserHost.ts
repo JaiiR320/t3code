@@ -1,9 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off - Names download files on the shared disk.
 /**
  * The desktop end of the desktop browser channel (see `DesktopBrowserEvent` in
- * contracts). The primary backend gets two file descriptors at spawn: this
- * service writes events for the desktop's tabs to one and reads commands from
- * the other. Each attached tab is reachable only through its `CdpRelay`.
+ * contracts). The primary backend uses bootstrap file descriptors; independent
+ * local services use private IPC connections. Events and commands are scoped
+ * to the owning environment. Each tab is reachable only through its `CdpRelay`.
  *
  * A tab is attached once its `<webview>` registers with a key the web app
  * gave it. The preview manager owns the tab's single debugger session and hands
@@ -35,6 +35,7 @@ const AGENT_INPUT_COMMAND =
 const AGENT_DOWNLOAD_WINDOW_MS = 5_000;
 
 export interface DesktopBrowserTabKey {
+  readonly environmentId?: string | undefined;
   readonly threadId: string;
   readonly tabId: string;
 }
@@ -45,7 +46,8 @@ export interface DesktopBrowserTabDebugger {
   readonly debugger: Electron.Debugger;
 }
 
-const keyOf = ({ threadId, tabId }: DesktopBrowserTabKey) => `${threadId}\u0000${tabId}`;
+const keyOf = ({ environmentId, threadId, tabId }: DesktopBrowserTabKey) =>
+  JSON.stringify([environmentId ?? null, threadId, tabId]);
 
 interface AttachedTab {
   readonly key: DesktopBrowserTabKey;
@@ -73,8 +75,13 @@ export class DesktopBrowserHost extends Context.Service<
      * announcing the tabs already attached, so a restarted backend hears them.
      */
     readonly events: Stream.Stream<Uint8Array>;
+    readonly eventsFor: (environmentId: string | undefined) => Stream.Stream<Uint8Array>;
     /** One line from the backend's browser control fd. */
     readonly handleCommandLine: (line: string) => Effect.Effect<void>;
+    readonly handleCommandLineFor: (
+      environmentId: string | undefined,
+      line: string,
+    ) => Effect.Effect<void>;
     /** Offers a server tab's `<webview>` to the server. */
     readonly attach: (key: DesktopBrowserTabKey, debuggee: DesktopBrowserTabDebugger) => void;
     /** Withdraws it: closed, swapped, crashed, or devtools needs the debugger. */
@@ -86,6 +93,11 @@ export class DesktopBrowserHost extends Context.Service<
     readonly humanStartedDownload: (source: Electron.WebContents) => boolean;
     /** Points a server tab's download at the server; false for any other download. */
     readonly placeDownload: (source: Electron.WebContents, item: Electron.DownloadItem) => boolean;
+    /** Whether the server currently drives this attached tab, so the renderer can reveal it. */
+    readonly hosting: Stream.Stream<{
+      readonly key: DesktopBrowserTabKey;
+      readonly hosting: boolean;
+    }>;
     /** The agent's cursor positions for attached tabs, keyed by their server tab. */
     readonly pointers: Stream.Stream<{
       readonly key: DesktopBrowserTabKey;
@@ -97,16 +109,21 @@ export class DesktopBrowserHost extends Context.Service<
 >()("@t3tools/desktop/preview/DesktopBrowserHost") {}
 
 export const make = Effect.gen(function* () {
-  const outbox = yield* PubSub.unbounded<DesktopBrowserEventType>();
+  const outbox = yield* PubSub.unbounded<DesktopBrowserEventType & DesktopBrowserTabKey>();
   const pointers = yield* PubSub.sliding<{
     readonly key: DesktopBrowserTabKey;
     readonly phase: "move" | "click";
     readonly x: number;
     readonly y: number;
   }>(16);
+  const hosting = yield* PubSub.unbounded<{
+    readonly key: DesktopBrowserTabKey;
+    readonly hosting: boolean;
+  }>();
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const tabs = new Map<string, AttachedTab>();
-  const emit = (event: DesktopBrowserEventType) => runFork(PubSub.publish(outbox, event));
+  const emit = (event: DesktopBrowserEventType & DesktopBrowserTabKey) =>
+    runFork(PubSub.publish(outbox, event));
 
   const relayFor = (tab: AttachedTab) => {
     if (tab.relay) return tab.relay;
@@ -160,6 +177,7 @@ export const make = Effect.gen(function* () {
     if (!tab) return;
     tabs.delete(id);
     tab.debuggee.debugger.off("message", tab.onMessage);
+    runFork(PubSub.publish(hosting, { key, hosting: false }));
     emit({ type: "detached", ...key });
   };
 
@@ -187,20 +205,26 @@ export const make = Effect.gen(function* () {
     emit({ type: "attached", ...key });
   };
 
-  const handleCommandLine = (line: string) =>
+  const handleCommandLineFor = (environmentId: string | undefined, line: string) =>
     Effect.sync(() => {
       const command = decodeCommand(line);
       if (Option.isNone(command)) return;
-      const tab = tabs.get(keyOf(command.value));
+      const commandKey = { ...command.value, environmentId };
+      const tab = tabs.get(keyOf(commandKey));
       if (!tab) return;
+      if (command.value.type === "hosting") {
+        runFork(PubSub.publish(hosting, { key: tab.key, hosting: command.value.hosting }));
+        return;
+      }
       if (command.value.type === "pointer") {
         const { threadId, tabId, phase, x, y } = command.value;
-        runFork(PubSub.publish(pointers, { key: { threadId, tabId }, phase, x, y }));
+        runFork(PubSub.publish(pointers, { key: { environmentId, threadId, tabId }, phase, x, y }));
         return;
       }
       if (command.value.type === "release") {
         // A new server connection starts with a fresh relay and fresh sessions.
         tab.relay = null;
+        runFork(PubSub.publish(hosting, { key: tab.key, hosting: false }));
         return;
       }
       if (AGENT_INPUT_COMMAND.test(command.value.message)) tab.agentInputAt = performance.now();
@@ -213,28 +237,37 @@ export const make = Effect.gen(function* () {
   };
 
   // Read when a backend starts, not when the host is built.
-  const announceAll = Effect.suspend(() =>
-    Effect.forEach(
-      [...tabs.values()],
-      (tab) => {
-        tab.relay = null;
-        return PubSub.publish(outbox, { type: "attached", ...tab.key });
-      },
-      { discard: true },
-    ),
-  );
+  const announceAll = (environmentId: string | undefined) =>
+    Effect.suspend(() =>
+      Effect.forEach(
+        [...tabs.values()].filter((tab) => tab.key.environmentId === environmentId),
+        (tab) => {
+          tab.relay = null;
+          return PubSub.publish(outbox, { type: "attached", ...tab.key });
+        },
+        { discard: true },
+      ),
+    );
 
-  return DesktopBrowserHost.of({
-    pointers: Stream.fromPubSub(pointers),
-    // Subscribes before announcing, so no attach falls between the two.
-    events: Stream.unwrap(
+  const eventsFor = (environmentId: string | undefined) =>
+    Stream.unwrap(
       Effect.gen(function* () {
         const subscription = yield* PubSub.subscribe(outbox);
-        yield* announceAll;
-        return Stream.fromSubscription(subscription);
+        yield* announceAll(environmentId);
+        return Stream.fromSubscription(subscription).pipe(
+          Stream.filter((event) => event.environmentId === environmentId),
+        );
       }),
-    ).pipe(Stream.map((event) => lineEncoder.encode(`${encodeEvent(event)}\n`))),
-    handleCommandLine,
+    ).pipe(Stream.map((event) => lineEncoder.encode(`${encodeEvent(event)}\n`)));
+
+  return DesktopBrowserHost.of({
+    hosting: Stream.fromPubSub(hosting),
+    pointers: Stream.fromPubSub(pointers),
+    // Subscribes before announcing, so no attach falls between the two.
+    events: eventsFor(undefined),
+    eventsFor,
+    handleCommandLine: (line) => handleCommandLineFor(undefined, line),
+    handleCommandLineFor,
     attach,
     detach,
     placeDownload,
