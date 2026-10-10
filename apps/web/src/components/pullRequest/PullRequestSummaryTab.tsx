@@ -223,7 +223,7 @@ function CollapsedComment({
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <article className="group rounded-lg border border-border/60 [contain-intrinsic-block-size:44px] [content-visibility:auto]">
+      <article className="group rounded-lg border border-border/60 [contain-intrinsic-block-size:auto_44px] [content-visibility:auto]">
         <div className="p-3">
           <div className="flex flex-wrap items-start gap-2">
             <CommentIdentity comment={comment} detail={detail} />
@@ -614,8 +614,9 @@ export function PullRequestSummaryTab({
       <article
         key={`${detail.url}:${comment.id}`}
         // Offscreen comments skip style, layout and paint. Bot comments carry pages of
-        // highlighted code, and the conversation is below the description either way.
-        className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:160px] [content-visibility:auto]"
+        // highlighted code, and the conversation is below the description either way. Remember
+        // measured heights so skipped cards do not shrink the scroll range at the bottom.
+        className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:auto_160px] [content-visibility:auto]"
       >
         <div className="flex flex-wrap items-start gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-muted-foreground">

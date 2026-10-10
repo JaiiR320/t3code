@@ -309,7 +309,7 @@ function ConversationGroup({
   if (first === undefined) return null;
 
   return (
-    <div className="relative mb-5 pl-12 [contain-intrinsic-block-size:48px] [content-visibility:auto]">
+    <div className="relative mb-5 pl-12 [contain-intrinsic-block-size:auto_48px] [content-visibility:auto]">
       <ActorTimelineMarker
         actors={actors}
         className="top-6"
@@ -376,7 +376,7 @@ function CommitEvent({
   return (
     <button
       type="button"
-      className="group relative mb-5 block w-full cursor-pointer rounded-sm pl-12 text-left outline-none [contain-intrinsic-block-size:48px] [content-visibility:auto] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      className="group relative mb-5 block w-full cursor-pointer rounded-sm pl-12 text-left outline-none [contain-intrinsic-block-size:auto_48px] [content-visibility:auto] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       aria-label={`View commit ${event.id}`}
       onClick={() => onOpen(event.id)}
     >
@@ -424,7 +424,7 @@ function LifecycleEvent({ event }: { event: PullRequestTimelineEvent }) {
           };
 
   return (
-    <div className="relative mb-5 pl-12 [contain-intrinsic-block-size:48px] [content-visibility:auto]">
+    <div className="relative mb-5 pl-12 [contain-intrinsic-block-size:auto_48px] [content-visibility:auto]">
       <IconMarker icon={presentation.icon} />
       <div className="py-1.5 text-xs">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -461,7 +461,7 @@ function ReviewVerdictEvent({
   reactions: ReactionSurface;
 }) {
   return (
-    <div className="group relative mb-5 pl-12 [contain-intrinsic-block-size:48px] [content-visibility:auto]">
+    <div className="group relative mb-5 pl-12 [contain-intrinsic-block-size:auto_48px] [content-visibility:auto]">
       {/* Pinned rather than centred: this row grows with a body, and a
           centred avatar drifts down beside it instead of sitting by the name. */}
       <ActorTimelineMarker
