@@ -177,7 +177,29 @@ try {
   if (seaNodeReady) {
     run(buildExe[0]!, buildExe.slice(1));
   } else {
-    run("vp", ["env", "exec", "--node", SEA_NODE_VERSION, ...buildExe]);
+    // In vp's system-first mode, `env exec --node` still puts the system Node
+    // (mise, nvm) ahead of the requested one, so move the SEA Node's bin first.
+    const vpPath = capture("vp", [
+      "env",
+      "exec",
+      "--node",
+      SEA_NODE_VERSION,
+      "sh",
+      "-c",
+      'printf %s "$PATH"',
+    ]);
+    const seaBin = vpPath.split(NodePath.delimiter).find((dir) => {
+      const node = NodePath.join(dir, "node");
+      return (
+        NodeFS.existsSync(node) &&
+        NodeChildProcess.execFileSync(node, ["--version"], { encoding: "utf8" }).trim() ===
+          `v${SEA_NODE_VERSION}`
+      );
+    });
+    if (!seaBin) throw new Error(`vp did not provide Node ${SEA_NODE_VERSION}.`);
+    run(buildExe[0]!, buildExe.slice(1), {
+      PATH: `${seaBin}${NodePath.delimiter}${vpPath}`,
+    });
   }
   run("node", [
     "scripts/build-cli-archive.ts",
