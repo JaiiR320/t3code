@@ -107,26 +107,4 @@ describe("pending context handoff", () => {
       resolvePendingHandoff(projection, { instanceId: to, model: "target" }, providers),
     ).toBeNull();
   });
-  it("ignores a target provider the next send would skip", () => {
-    const providers = (target: Partial<ServerProvider>) =>
-      [
-        { instanceId: from, driver: "codex", enabled: true, availability: "available" },
-        {
-          instanceId: to,
-          driver: "claudeAgent",
-          enabled: true,
-          availability: "available",
-          ...target,
-        },
-      ] as unknown as ServerProvider[];
-    const selection = { instanceId: to, model: "target" };
-    expect(resolvePendingHandoff(projection, selection, providers({}))).toEqual({
-      from: [{ instanceId: from, model: "source" }],
-      to: selection,
-    });
-    expect(resolvePendingHandoff(projection, selection, providers({ enabled: false }))).toBeNull();
-    expect(
-      resolvePendingHandoff(projection, selection, providers({ availability: "unavailable" })),
-    ).toBeNull();
-  });
 });

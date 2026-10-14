@@ -7739,20 +7739,21 @@ export default function ChatView(props: ChatViewProps) {
       item.type === "user_message" &&
       (item.text.trim().toLowerCase() !== "/compact" || item.attachments.length > 0),
   );
-  const pendingHandoff = useMemo(
-    () =>
-      resolvePendingHandoff(
-        serverProjection,
-        composerSelectedModelSelection ?? activeThread?.modelSelection,
-        providerStatuses,
-      ),
-    [
+  const pendingHandoff = useMemo(() => {
+    const selection = composerSelectedModelSelection ?? activeThread?.modelSelection;
+    // Preview only the provider the next send will use.
+    return resolvePendingHandoff(
       serverProjection,
-      composerSelectedModelSelection,
-      activeThread?.modelSelection,
+      selection?.instanceId === activeProviderInstanceId ? selection : null,
       providerStatuses,
-    ],
-  );
+    );
+  }, [
+    serverProjection,
+    composerSelectedModelSelection,
+    activeThread?.modelSelection,
+    activeProviderInstanceId,
+    providerStatuses,
+  ]);
   const compactThreadUnavailable =
     !canOperateThread ||
     !activeThread ||
