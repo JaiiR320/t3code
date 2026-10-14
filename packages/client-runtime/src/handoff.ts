@@ -31,6 +31,7 @@ export function resolvePendingHandoff(
   if (from === undefined || selection == null) return null;
   const source = providers.find((provider) => provider.instanceId === from.instanceId);
   const target = providers.find((provider) => provider.instanceId === selection.instanceId);
+  if (target?.enabled === false || target?.availability === "unavailable") return null;
   const needsHandoff =
     from.instanceId === selection.instanceId
       ? from.model !== selection.model && target?.requiresNewThreadForModelChange === true
