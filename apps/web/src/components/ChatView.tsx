@@ -7741,17 +7741,16 @@ export default function ChatView(props: ChatViewProps) {
   );
   const pendingHandoff = useMemo(() => {
     const selection = composerSelectedModelSelection ?? activeThread?.modelSelection;
-    // Preview only the provider the next send will use.
-    return resolvePendingHandoff(
-      serverProjection,
-      selection?.instanceId === activeProviderInstanceId ? selection : null,
-      providerStatuses,
+    // Preview only a provider the next send can use.
+    const usable = providerInstanceEntries.some(
+      (entry) => entry.instanceId === selection?.instanceId && entry.enabled && entry.isAvailable,
     );
+    return resolvePendingHandoff(serverProjection, usable ? selection : null, providerStatuses);
   }, [
     serverProjection,
     composerSelectedModelSelection,
     activeThread?.modelSelection,
-    activeProviderInstanceId,
+    providerInstanceEntries,
     providerStatuses,
   ]);
   const compactThreadUnavailable =
