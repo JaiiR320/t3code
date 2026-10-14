@@ -2,6 +2,7 @@ import { sourceControlClients } from "@t3tools/client-runtime/source-control-cli
 import { useAtomCommand } from "~/state/use-atom-command";
 import type {
   EnvironmentId,
+  PullRequestActor,
   PullRequestComment,
   PullRequestDetailView,
   PullRequestRef,
@@ -72,8 +73,10 @@ import { PullRequestConversationGhost } from "./PullRequestGhosts";
 import { sectionCollapseAnchorScrollTop } from "./pullRequestSummaryScroll.logic";
 
 /** One reviewer, however a host happens to have cased their login this time. */
-function reviewerKey(login: string): string {
-  return login.toLowerCase();
+function reviewerKey(actor: PullRequestActor): string {
+  return (
+    actor.kind === "team" ? `team:${actor.organization}/${actor.login}` : `user:${actor.login}`
+  ).toLowerCase();
 }
 
 function CommentIdentity({
@@ -465,7 +468,7 @@ export function PullRequestSummaryTab({
   // would show one reviewer twice and drop the verdict off both.
   const outcomeByLogin = new Map(
     reviewOutcomes.flatMap((entry) =>
-      entry.actor ? [[reviewerKey(entry.actor.login), entry] as const] : [],
+      entry.actor ? [[reviewerKey(entry.actor), entry] as const] : [],
     ),
   );
   // Everyone whose face belongs on this row: the people a review was asked of, then anyone who
@@ -473,17 +476,16 @@ export function PullRequestSummaryTab({
   // have reviewed, and their verdict is the thing this row now exists to show.
   const reviewerEntries = [
     ...detail.reviewers.map((actor) => ({
-      key: actor.login,
+      key: reviewerKey(actor),
       actor,
-      outcome: outcomeByLogin.get(reviewerKey(actor.login))?.outcome ?? null,
-      stale: outcomeByLogin.get(reviewerKey(actor.login))?.stale ?? false,
+      outcome: outcomeByLogin.get(reviewerKey(actor))?.outcome ?? null,
+      stale: outcomeByLogin.get(reviewerKey(actor))?.stale ?? false,
     })),
     ...reviewOutcomes
       .filter(
         (entry) =>
           !detail.reviewers.some(
-            (actor) =>
-              entry.actor !== null && reviewerKey(actor.login) === reviewerKey(entry.actor.login),
+            (actor) => entry.actor !== null && reviewerKey(actor) === reviewerKey(entry.actor),
           ),
       )
       .map((entry) => ({

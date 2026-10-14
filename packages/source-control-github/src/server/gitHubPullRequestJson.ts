@@ -46,9 +46,8 @@ const RawActorSchema = Schema.Struct({
   __typename: Schema.optional(Schema.String),
   is_bot: Schema.optional(Schema.Boolean),
   /**
-   * Optional because a review can be requested from a team or a mannequin, which the query has
-   * no fragment for and GraphQL answers with an empty object. A reviewer with no login names
-   * nobody to show, and must not fail the response the conversation travels in.
+   * Optional because teams use a slug, while an unselected union member such as a mannequin
+   * returns an empty object. Neither must fail the response the conversation travels in.
    */
   login: Schema.optional(Schema.String),
   /** The node id, which is how a listing's authors are resolved to avatars in one request. */
@@ -58,12 +57,21 @@ const RawActorSchema = Schema.Struct({
   avatarUrl: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
+/** Requested teams are identified by their organization and slug, rather than a user login. */
+const RawRequestedReviewerSchema = Schema.Struct({
+  ...RawActorSchema.fields,
+  slug: Schema.optional(Schema.NullOr(Schema.String)),
+  organization: Schema.optional(Schema.Struct({ login: Schema.String })),
+});
+
 const RawLabelSchema = Schema.Struct({
   name: Schema.String,
   color: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const RawReviewRequestSchema = Schema.Struct({
+  organization: Schema.optional(Schema.Struct({ login: Schema.String })),
+  avatarUrl: Schema.optional(Schema.NullOr(Schema.String)),
   login: Schema.optional(Schema.NullOr(Schema.String)),
   slug: Schema.optional(Schema.NullOr(Schema.String)),
   name: Schema.optional(Schema.NullOr(Schema.String)),
@@ -618,8 +626,7 @@ const RawReviewThreadsSchema = Schema.Struct({
             Schema.Struct({
               nodes: Schema.Array(
                 Schema.Struct({
-                  // Null for a team, which is a request nobody in particular owns.
-                  requestedReviewer: Schema.optional(Schema.NullOr(RawActorSchema)),
+                  requestedReviewer: Schema.optional(Schema.NullOr(RawRequestedReviewerSchema)),
                 }),
               ),
             }),
@@ -835,7 +842,7 @@ export const pullRequestCoreGraphQlQuery = (host: string) => {
       viewerCanUpdate viewerDidAuthor viewerCanUpdateBranch
       baseRef { compare(headRef: $headRef) { behindBy } }
       reviewRequests(first: 100) {
-        nodes { requestedReviewer { ... on User { login name } ... on Bot { login } ... on Team { slug name } } }
+        nodes { requestedReviewer { ... on User { login name } ... on Bot { login } ... on Team { slug name avatarUrl organization { login } } } }
       }
       labels(first: 100) { nodes { name color } }
       commits(last: 1) {
@@ -1052,6 +1059,7 @@ export const REVIEW_THREADS_GRAPHQL_QUERY = `query($owner: String!, $name: Strin
           requestedReviewer {
             ... on User { login name avatarUrl }
             ... on Bot { __typename login avatarUrl }
+            ... on Team { slug name avatarUrl organization { login } }
           }
         }
       }
@@ -1336,6 +1344,7 @@ export interface GitHubPullRequestListItem {
 }
 
 export interface GitHubPullRequestDetail extends GitHubPullRequestListItem {
+  readonly reviewRequestTeams: ReadonlyArray<PullRequestActor>;
   /** True only when GitHub says the head belongs to another repository. */
   readonly isCrossRepository?: boolean;
   /** The owner of the head branch's repository; null where `gh` did not say. */
@@ -1401,7 +1410,9 @@ function toPullRequestViewerFields(
   return { canUpdate: raw?.viewerCanUpdate !== false, didAuthor: raw?.viewerDidAuthor === true };
 }
 
-function toActor(raw: Schema.Schema.Type<typeof RawActorSchema> | null | undefined) {
+function toActor(
+  raw: Schema.Schema.Type<typeof RawActorSchema> | null | undefined,
+): PullRequestActor | null {
   const login = trimmed(raw?.login);
   return login === null
     ? null
@@ -1410,6 +1421,22 @@ function toActor(raw: Schema.Schema.Type<typeof RawActorSchema> | null | undefin
         name: trimmed(raw?.name),
         avatarUrl: trimmed(raw?.avatarUrl),
         ...(raw?.__typename === "Bot" || raw?.is_bot === true ? { isBot: true } : {}),
+      };
+}
+
+function toTeamActor(
+  raw: Omit<Schema.Schema.Type<typeof RawRequestedReviewerSchema>, "login"> | null | undefined,
+): PullRequestActor | null {
+  const slug = trimmed(raw?.slug);
+  const organization = trimmed(raw?.organization?.login);
+  return slug === null || organization === null
+    ? null
+    : {
+        kind: "team",
+        organization,
+        login: slug,
+        name: trimmed(raw?.name),
+        avatarUrl: trimmed(raw?.avatarUrl),
       };
 }
 
@@ -1759,6 +1786,10 @@ function toDetail(raw: Schema.Schema.Type<typeof RawDetailSchema>): GitHubPullRe
   const autoMergeMethod = toMergeMethod(raw.autoMergeRequest?.mergeMethod);
   return {
     ...toListItem(raw),
+    reviewRequestTeams: (raw.reviewRequests ?? []).flatMap((request) => {
+      const team = toTeamActor(request);
+      return team === null ? [] : [team];
+    }),
     ...(typeof raw.isCrossRepository === "boolean"
       ? { isCrossRepository: raw.isCrossRepository }
       : {}),
@@ -2772,9 +2803,13 @@ export function decodeReviewThreadsJson(
     ...(pullRequest.reviewRequests?.nodes ?? []).map((node) => node.requestedReviewer),
     ...(pullRequest.latestReviews?.nodes ?? []).map((node) => node.author),
   ]) {
-    const actor = toActor(raw);
-    // Keyed by login, so someone who was asked and then answered appears once.
-    if (actor !== null && !reviewers.has(actor.login)) reviewers.set(actor.login, actor);
+    const actor = toActor(raw) ?? toTeamActor(raw);
+    if (actor === null) continue;
+    const key =
+      actor.kind === "team"
+        ? `team:${actor.organization}/${actor.login}`.toLowerCase()
+        : `user:${actor.login}`.toLowerCase();
+    if (!reviewers.has(key)) reviewers.set(key, actor);
   }
   const commitStats = new Map<string, { readonly additions: number; readonly deletions: number }>();
   const commits: PullRequestCommit[] = [];
@@ -2940,12 +2975,6 @@ export const REVIEWER_CANDIDATES_GRAPHQL_QUERY = `query($owner: String!, $name: 
     }
   }
 }`;
-
-/** A team answers with a slug where a user answers with a login, and nothing else differs. */
-const RawRequestedReviewerSchema = Schema.Struct({
-  ...RawActorSchema.fields,
-  slug: Schema.optional(Schema.NullOr(Schema.String)),
-});
 
 const RawReviewerCandidatesSchema = Schema.Struct({
   data: Schema.Struct({

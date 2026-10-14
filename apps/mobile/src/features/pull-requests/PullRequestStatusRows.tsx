@@ -295,11 +295,18 @@ export function PullRequestReviewersRow(props: RowProps) {
           {props.pr.reviewers
             .filter(
               (reviewer) =>
-                !summary.reviews.some((review) => review.author?.login === reviewer.login),
+                reviewer.kind === "team" ||
+                !summary.reviews.some(
+                  (review) => review.author?.login.toLowerCase() === reviewer.login.toLowerCase(),
+                ),
             )
             .map((reviewer) => (
               <View
-                key={reviewer.login}
+                key={
+                  reviewer.kind === "team"
+                    ? `team:${reviewer.organization}/${reviewer.login}`
+                    : `user:${reviewer.login}`
+                }
                 accessibilityLabel={`${reviewer.login}, Review requested`}
                 className="min-h-14 flex-row items-center gap-3 px-4 py-2"
               >

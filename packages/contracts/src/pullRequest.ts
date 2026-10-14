@@ -121,6 +121,9 @@ export const PullRequestBaseComparison = Schema.Literals(["up-to-date", "behind"
 export type PullRequestBaseComparison = typeof PullRequestBaseComparison.Type;
 
 export const PullRequestActor = Schema.Struct({
+  /** Teams occupy a separate identity namespace from individual account logins. */
+  kind: Schema.optional(Schema.Literals(["user", "team"])),
+  organization: Schema.optional(TrimmedNonEmptyString),
   /** Present when the host identifies an automated account. */
   isBot: Schema.optional(Schema.Boolean),
   login: TrimmedNonEmptyString,

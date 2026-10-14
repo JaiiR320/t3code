@@ -315,6 +315,31 @@ describe("pull request detail decoding", () => {
       commits: page.commits ?? [],
     }));
 
+  it("keeps requested team identity in the initial detail", () => {
+    const raw = JSON.parse(detailJson) as Record<string, unknown>;
+    const detail = expectSuccess(
+      decodePullRequestDetailJson(
+        JSON.stringify({
+          ...raw,
+          reviewRequests: [
+            { login: "platform" },
+            { slug: "platform", name: "Platform Team", organization: { login: "pingdotgg" } },
+          ],
+        }),
+      ),
+    );
+    expect(detail.reviewRequestLogins).toEqual(["platform"]);
+    expect(detail.reviewRequestTeams).toEqual([
+      {
+        kind: "team",
+        organization: "pingdotgg",
+        login: "platform",
+        name: "Platform Team",
+        avatarUrl: null,
+      },
+    ]);
+  });
+
   it("maps check-run status and commit-status state onto one vocabulary", () => {
     const detail = expectSuccess(decodePullRequestDetailJson(detailJson));
     expect(detail.checks.map((check) => [check.name, check.status])).toEqual([
@@ -718,6 +743,87 @@ describe("review thread decoding", () => {
     );
 
     expect(result.reviewers).toHaveLength(1);
+  });
+
+  it("includes a requested team alongside individual reviewers", () => {
+    const result = expectSuccess(
+      decodeReviewThreadsJson(
+        reviewJson({
+          requested: [
+            {
+              __typename: "Team",
+              slug: "web-platform",
+              name: "Web Platform",
+              organization: { login: "pingdotgg" },
+              avatarUrl: "https://avatars/team.png",
+            },
+            { __typename: "User", login: "julius", name: "Julius" },
+          ],
+        }),
+      ),
+    );
+
+    expect(result.reviewers).toHaveLength(2);
+    expect(result.reviewers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "team",
+          organization: "pingdotgg",
+          login: "web-platform",
+          name: "Web Platform",
+          avatarUrl: "https://avatars/team.png",
+        }),
+        expect.objectContaining({ login: "julius", name: "Julius" }),
+      ]),
+    );
+  });
+
+  it("keeps a requested team distinct from a reviewed user with the same slug and login", () => {
+    const result = expectSuccess(
+      decodeReviewThreadsJson(
+        reviewJson({
+          requested: [
+            {
+              __typename: "Team",
+              slug: "platform",
+              name: "Platform Team",
+              organization: { login: "pingdotgg" },
+              avatarUrl: "https://avatars/team.png",
+            },
+            { __typename: "User", login: "platform", avatarUrl: "https://avatars/user.png" },
+          ],
+          reviewed: [
+            { __typename: "User", login: "platform", avatarUrl: "https://avatars/user.png" },
+          ],
+        }),
+      ),
+    );
+
+    expect(result.reviewers).toHaveLength(2);
+    expect(result.reviewers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Platform Team", avatarUrl: "https://avatars/team.png" }),
+        expect.objectContaining({ login: "platform", avatarUrl: "https://avatars/user.png" }),
+      ]),
+    );
+    expect(result.avatarsByLogin.get("platform")).toBe("https://avatars/user.png");
+  });
+
+  it("keeps teams with the same slug in different organizations distinct", () => {
+    const result = expectSuccess(
+      decodeReviewThreadsJson(
+        reviewJson({
+          requested: [
+            { slug: "platform", organization: { login: "pingdotgg" } },
+            { slug: "platform", organization: { login: "another-org" } },
+          ],
+        }),
+      ),
+    );
+    expect(result.reviewers.map((actor) => actor.organization)).toEqual([
+      "pingdotgg",
+      "another-org",
+    ]);
   });
 
   it("skips a team request, which names nobody to show", () => {

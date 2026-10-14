@@ -21,7 +21,7 @@ vi.mock("../ui/menu", () => ({
 vi.mock("../ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => children,
   TooltipTrigger: ({ children }: { children: ReactNode }) => children,
-  TooltipPopup: () => null,
+  TooltipPopup: ({ children }: { children: ReactNode }) => <span>{children}</span>,
 }));
 
 import { PullRequestSummaryTab } from "./PullRequestSummaryTab";
@@ -127,6 +127,51 @@ function click(title: string) {
     heading(title).props.onClick({ nativeEvent: {}, preventDefault() {}, stopPropagation() {} }),
   );
 }
+
+it.each([
+  ["APPROVED", "Approved"],
+  ["CHANGES_REQUESTED", "Changes requested"],
+])("keeps a user's %s outcome off a requested team with the same slug", (state, label) => {
+  const team = {
+    kind: "team" as const,
+    login: "platform",
+    name: "Platform Team",
+    avatarUrl: "https://avatars/team.png",
+    organization: "pingdotgg",
+  };
+  const user = { login: "platform", name: "Platform User", avatarUrl: "https://avatars/user.png" };
+  act(() => {
+    renderer = create(
+      render({
+        ...detail,
+        reviewers: [team, user],
+        comments: [
+          {
+            id: "review-platform",
+            kind: "review",
+            author: user,
+            body: "",
+            createdAt: "2026-09-01T00:01:00Z",
+            url: null,
+            path: null,
+            reviewState: state,
+          },
+        ],
+      }),
+    );
+  });
+
+  const reviewerLabels = renderer.root
+    .findAllByType("span")
+    .flatMap((span) =>
+      span.children.filter(
+        (child): child is string => typeof child === "string" && child.startsWith("Platform "),
+      ),
+    );
+  expect(reviewerLabels).toContain(`Platform User (@platform) — ${label}`);
+  expect(reviewerLabels).toContain("Platform Team (@platform)");
+  expect(reviewerLabels).not.toContain(`Platform Team (@platform) — ${label}`);
+});
 
 it("toggles checks from their heading and resets sections for another pull request", () => {
   act(() => {
