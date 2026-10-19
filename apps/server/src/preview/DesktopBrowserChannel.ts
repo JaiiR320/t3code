@@ -1,7 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - Bridges Playwright to a local desktop browser host.
 /**
- * The server end of the desktop browser channel (see `DesktopBrowserEvent`).
- *
  * Playwright connects over CDP only through a WebSocket URL, so each attached
  * desktop tab gets a loopback endpoint with an unguessable path. Its frames
  * cross bootstrap file descriptors or a private local socket to the desktop
@@ -54,19 +52,13 @@ export class DesktopBrowserChannel extends Context.Service<
     readonly available: boolean;
     readonly localEndpoint: { readonly socketPath: string; readonly token: string } | null;
     /**
-     * Waits for a tab to be attached. Subscribes before it checks, so an
-     * attach landing in between is never missed. False after `timeout`.
+     * Subscribes before it checks, so an attach landing in between is never
+     * missed.
      */
     readonly awaitAttached: (key: DesktopTabKey, timeout: Duration.Input) => Effect.Effect<boolean>;
-    /** Desktop tabs as they detach. */
     readonly detached: Stream.Stream<DesktopTabKey>;
-    /** Desktop tabs as they attach, including a tab coming back after its DevTools close. */
     readonly attached: Stream.Stream<DesktopTabKey>;
     readonly isAttached: (key: DesktopTabKey) => Effect.Effect<boolean>;
-    /**
-     * A one-connection CDP endpoint for an attached tab. Closing the scope
-     * releases the tab on the desktop and stops the endpoint.
-     */
     readonly endpoint: (key: DesktopTabKey) => Effect.Effect<string, never, Scope.Scope>;
     /** Reports whether this server is driving the desktop tab. */
     readonly hosting: (key: DesktopTabKey, hosting: boolean) => Effect.Effect<void>;
@@ -84,7 +76,6 @@ const make = Effect.gen(function* () {
   const controlFd = config.desktopBrowserControlFd;
   const changes = yield* PubSub.unbounded<{ key: DesktopTabKey; attached: boolean }>();
   const attachedTabs = new Set<string>();
-  /** CDP frames from the desktop, per tab, for the endpoint connected to it. */
   const inbound = new Map<string, Queue.Queue<string>>();
   const writeLock = yield* Semaphore.make(1);
 
