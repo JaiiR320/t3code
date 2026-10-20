@@ -187,12 +187,14 @@ interface DiffPanelProps {
   mode?: DiffPanelMode;
   composerDraftTarget: ScopedThreadRef | DraftId;
   workspaceMutationId: string | null;
+  visible: boolean;
 }
 
 export default function DiffPanel({
   mode = "inline",
   composerDraftTarget,
   workspaceMutationId,
+  visible,
 }: DiffPanelProps) {
   const { resolvedTheme } = useTheme();
   const settings = useClientSettings((settings) => ({
@@ -347,9 +349,8 @@ export default function DiffPanel({
 
   const selectedPatch = selectedTurn ? activeCheckpointDiff.data?.diff : gitDiff;
   const isSelectedPatchTruncated = !selectedTurn && selectedGitSource?.truncated === true;
-  const isLoadingSelectedPatch = selectedTurn
-    ? activeCheckpointDiff.isPending
-    : branchDiffPreview.isPending;
+  const selectedPatchQuery = selectedTurn ? activeCheckpointDiff : branchDiffPreview;
+  const isLoadingSelectedPatch = selectedPatchQuery.isPending && selectedPatchQuery.data === null;
   const selectedPatchError = selectedTurn ? activeCheckpointDiff.error : branchDiffPreview.error;
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
@@ -462,6 +463,38 @@ export default function DiffPanel({
     preview: renderablePatch,
   });
   const refreshBranchDiffPreview = refreshPreviewQuery;
+  const previewOpenHandledRef = useRef(false);
+  const refreshDiffForWorkspaceMutation = useStableCallback(() => {
+    previewOpenHandledRef.current = true;
+    refreshBranchDiffPreview();
+  });
+
+  // A mutation refresh also satisfies revalidation for the current opening.
+  useWorkspaceMutationRefresh({
+    enabled: canRefreshGitDiff,
+    mutationId: workspaceMutationId,
+    refresh: refreshDiffForWorkspaceMutation,
+    resourceKey: `diff:${activeThreadRefreshKey ?? ""}`,
+  });
+
+  useEffect(() => {
+    if (!visible || !canReadFiles || !canRefreshGitDiff) {
+      previewOpenHandledRef.current = false;
+      return;
+    }
+    if (previewOpenHandledRef.current) return;
+    previewOpenHandledRef.current = true;
+    if (branchDiffPreview.data !== null && !branchDiffPreview.isPending) {
+      refreshBranchDiffPreview();
+    }
+  }, [
+    branchDiffPreview.data,
+    branchDiffPreview.isPending,
+    canReadFiles,
+    canRefreshGitDiff,
+    refreshBranchDiffPreview,
+    visible,
+  ]);
 
   useEffect(() => {
     if (!canRefreshGitDiff) return;
@@ -469,13 +502,6 @@ export default function DiffPanel({
     window.addEventListener("focus", refreshOnFocus);
     return () => window.removeEventListener("focus", refreshOnFocus);
   }, [canRefreshGitDiff, refreshBranchDiffPreview]);
-
-  useWorkspaceMutationRefresh({
-    enabled: canRefreshGitDiff,
-    mutationId: workspaceMutationId,
-    refresh: refreshBranchDiffPreview,
-    resourceKey: `diff:${activeThreadRefreshKey ?? ""}`,
-  });
 
   const isRefreshingDiff = branchDiffPreview.isPending || areFilePatchesPending;
   const renderableFileEntries = renderableFiles.map(getCachedFileEntry);
